@@ -22,6 +22,5 @@ outputs/
 tmp/
 work/
 
-# Claude Code 运行时文件
-.agents/.skill-lock.json
-.agents/skills/
+# 用户级 agent 配置（junction 到 %USERPROFILE%\.agents，不入库）
+.agents/
