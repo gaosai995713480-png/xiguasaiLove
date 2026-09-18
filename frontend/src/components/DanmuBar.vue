@@ -288,7 +288,7 @@ onUnmounted(() => {
 
 /* Danmu Bar */
 .danmu-bar {
-  position: fixed; left: 32px; right: 120px; bottom: 32px; z-index: 4;
+  position: fixed; left: calc(24px + var(--safe-left)); right: calc(120px + var(--safe-right)); bottom: var(--fab-bottom); z-index: 4;
   display: flex; align-items: center; gap: 12px; padding: 14px 18px;
   border-radius: 20px; background: var(--glass-bg); backdrop-filter: blur(30px);
   border: 1px solid var(--glass-border); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
@@ -318,7 +318,7 @@ onUnmounted(() => {
 
 /* Settings panel */
 .danmu-settings {
-  position: fixed; left: 32px; bottom: 100px; z-index: 4;
+  position: fixed; left: calc(24px + var(--safe-left)); bottom: calc(var(--fab-bottom) + 68px); z-index: 4;
   width: min(320px, 86vw); padding: 20px; border-radius: 20px;
   background: var(--glass-bg); backdrop-filter: blur(30px);
   border: 1px solid var(--glass-border);
@@ -365,7 +365,7 @@ onUnmounted(() => {
 
 /* Danmu Panel */
 .danmu-panel {
-  position: fixed; left: 32px; right: 120px; bottom: 90px;
+  position: fixed; left: calc(24px + var(--safe-left)); right: calc(120px + var(--safe-right)); bottom: calc(var(--fab-bottom) + 58px);
   max-height: 50vh; z-index: 5; border-radius: 20px;
   background: var(--glass-bg); backdrop-filter: blur(30px);
   border: 1px solid var(--glass-border);
@@ -409,15 +409,14 @@ onUnmounted(() => {
 
 @media (max-width: 720px) {
   .danmu-bar {
-    left: 12px;
-    right: 80px;
-    bottom: 16px;
+    left: calc(12px + var(--safe-left));
+    right: calc(76px + var(--safe-right));
     padding: 10px 12px;
     gap: 8px;
   }
 
   .danmu-bar input {
-    font-size: 14px;
+    font-size: 16px;
   }
 
   .danmu-counter {
@@ -427,25 +426,24 @@ onUnmounted(() => {
   .danmu-bar button:last-child {
     padding: 6px 14px;
     font-size: 13px;
+    min-height: var(--touch-min);
   }
 
   .danmu-settings-toggle {
-    width: 34px;
-    height: 34px;
+    width: var(--touch-min);
+    height: var(--touch-min);
     font-size: 16px;
   }
 
   .danmu-settings {
-    left: 12px;
-    width: calc(100vw - 24px);
-    bottom: 84px;
+    left: calc(12px + var(--safe-left));
+    width: calc(100vw - 24px - var(--safe-left) - var(--safe-right));
   }
 
   .danmu-panel {
-    left: 8px;
-    right: 8px;
-    bottom: 80px;
-    max-height: 45vh;
+    left: calc(8px + var(--safe-left));
+    right: calc(8px + var(--safe-right));
+    max-height: 45dvh;
     border-radius: 16px;
   }
 

@@ -118,6 +118,17 @@ def search_music(keyword: str = "", platform: str = "netease", limit: int = 10):
     return data
 
 
+def to_https_media_url(url: str) -> str:
+    """把 http 音源升到 https。
+
+    线上站点是 HTTPS 时，Chrome 会拦截 http 音频（混合内容），
+    <audio>.play() 以 NotSupportedError 失败。网易云 CDN 本身支持 https。
+    """
+    if isinstance(url, str) and url.startswith("http://"):
+        return "https://" + url[7:]
+    return url or ""
+
+
 def resolve_meting_url(song_id: str, platform: str) -> str:
     """解析在线音乐平台的播放直链，失败时回退网易云外链"""
     result = call_meting("url", platform=platform, id=song_id)
@@ -127,7 +138,7 @@ def resolve_meting_url(song_id: str, platform: str) -> str:
         url = data.get("url", "") if isinstance(data, dict) else ""
     if not url and platform == "netease":
         url = f"https://music.163.com/song/media/outer/url?id={song_id}.mp3"
-    return url
+    return to_https_media_url(url)
 
 
 @router.get("/music/url")
@@ -171,12 +182,29 @@ def _load_bgm() -> dict:
 
 
 def _local_audio_url(audio_key: str, storage: str) -> str:
-    """把音频存储 key 换成可播放的 URL：OSS 走签名直链，本地走后端接口"""
+    """把音频存储 key 换成可播放的 URL：OSS 走签名直链，本地走后端接口。
+
+    文件已经不在时返回空字符串，避免首页拿到一条 404 直链后静默播不出来。
+    """
+    if not audio_key:
+        return ""
     if storage == "oss":
         bucket = get_oss_bucket()
         if not bucket:
             return ""
-        return bucket.sign_url("GET", f"music/{audio_key}", aligned_expires(), slash_safe=True)
+        object_key = f"music/{audio_key}"
+        try:
+            if not bucket.object_exists(object_key):
+                logger.warning("首页 BGM 在 OSS 上不存在: %s", object_key)
+                return ""
+        except Exception:
+            logger.warning("检查首页 BGM 是否存在失败: %s", object_key, exc_info=True)
+            return ""
+        return bucket.sign_url("GET", object_key, aligned_expires(), slash_safe=True)
+    target = settings.music_dir / audio_key
+    if not target.is_file():
+        logger.warning("首页 BGM 本地文件不存在: %s", audio_key)
+        return ""
     return f"/api/music/bgm/file/{audio_key}"
 
 
@@ -209,8 +237,11 @@ def get_home_bgm(_=Depends(require_auth)):
     else:
         return {"enabled": False}
 
+    if not url:
+        return {"enabled": False}
+
     return {
-        "enabled": bool(url),
+        "enabled": True,
         "source": source,
         "platform": platform,
         "song_id": bgm.get("song_id", ""),

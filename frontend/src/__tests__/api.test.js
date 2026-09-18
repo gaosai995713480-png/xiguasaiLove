@@ -9,7 +9,7 @@ const mockFetch = vi.fn()
 vi.stubGlobal('fetch', mockFetch)
 
 // 动态导入以确保 mock 生效
-let danmuApi, authApi
+let danmuApi, authApi, dayApi
 
 beforeEach(async () => {
   vi.resetModules()
@@ -17,6 +17,7 @@ beforeEach(async () => {
   const api = await import('../api/index.js')
   danmuApi = api.danmuApi
   authApi = api.authApi
+  dayApi = api.dayApi
 })
 
 describe('danmuApi', () => {
@@ -113,5 +114,21 @@ describe('authApi', () => {
       const result = await authApi.status()
       expect(result.authenticated).toBe(false)
     })
+  })
+})
+
+describe('dayApi', () => {
+  it('按日期请求这一天的聚合结果', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ date: '2023-10-26', timeline: [] }),
+    })
+
+    const result = await dayApi.get('2023-10-26')
+
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/day/2023-10-26')
+    expect(result.date).toBe('2023-10-26')
   })
 })

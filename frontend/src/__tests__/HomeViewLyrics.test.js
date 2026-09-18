@@ -12,6 +12,7 @@ const musicState = reactive({
   isPlaying: false,
   bgmBlocked: false,
   bgm: null,
+  playError: '',
   startBgm: vi.fn(),
   togglePlay: vi.fn(),
 })

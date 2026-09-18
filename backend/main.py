@@ -16,7 +16,7 @@ from .database import init_tables
 from .services.recipe_bootstrap import ensure_howtocook_recipes_seeded
 
 # 路由
-from .routers import auth, danmu, timeline, capsule, mood, wish, map, music, weather, photos, config, jukebox, gallery, users, express, ai, ai_skills, ai_conversations, recipes
+from .routers import auth, danmu, timeline, capsule, mood, wish, map, music, weather, photos, config, jukebox, gallery, users, express, ai, ai_skills, ai_conversations, recipes, day
 from .tripstar import router as tripstar_router
 
 logging.basicConfig(
@@ -60,6 +60,7 @@ app.include_router(ai.router)
 app.include_router(ai_skills.router)
 app.include_router(ai_conversations.router)
 app.include_router(recipes.router)
+app.include_router(day.router)
 app.include_router(tripstar_router.router)
 
 

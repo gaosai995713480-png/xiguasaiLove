@@ -161,8 +161,8 @@ onMounted(() => {
 
 <style scoped>
 .tripstar-page {
-  min-height: 100vh;
-  padding: 88px 24px 48px;
+  min-height: 100dvh;
+  padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom);
   color: var(--text-primary);
 }
 
@@ -268,10 +268,6 @@ textarea {
 }
 
 @media (max-width: 720px) {
-  .tripstar-page {
-    padding: 72px 14px 36px;
-  }
-
   .hero,
   .planner {
     padding: 22px;

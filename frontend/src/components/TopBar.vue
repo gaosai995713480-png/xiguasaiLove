@@ -48,11 +48,12 @@ function handleBack() {
   top: 0;
   left: 0;
   right: 0;
-  z-index: 10;
+  z-index: 40;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 20px;
+  min-height: var(--topbar-height);
+  padding: calc(10px + var(--safe-top)) calc(20px + var(--safe-right)) 10px calc(20px + var(--safe-left));
   background: var(--glass-bg);
   backdrop-filter: blur(30px);
   border-bottom: 1px solid var(--glass-border);
@@ -87,15 +88,19 @@ h1 {
 
 @media (max-width: 720px) {
   .top-bar {
-    padding: 10px 14px;
+    padding: calc(8px + var(--safe-top)) calc(12px + var(--safe-right)) 8px calc(12px + var(--safe-left));
     gap: 8px;
+    flex-wrap: wrap;
   }
 
   .back-btn {
     font-size: 13px;
-    padding: 6px 10px;
+    padding: 8px 12px;
     border-radius: 8px;
     flex-shrink: 0;
+    min-height: var(--touch-min);
+    display: inline-flex;
+    align-items: center;
   }
 
   h1 {

@@ -10,7 +10,6 @@ import LyricFxSwitcher from '../components/LyricFxSwitcher.vue'
 import WeatherCard from '../components/WeatherCard.vue'
 import DanmuBar from '../components/DanmuBar.vue'
 import CapsuleSection from '../components/CapsuleSection.vue'
-import NavSidebar from '../components/NavSidebar.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -22,7 +21,8 @@ const weatherRef = ref(null)
 const danmuRef = ref(null)
 
 // ===== Together Days =====
-const startDate = new Date('2023-10-26')
+const TOGETHER_START = '2023-10-26'
+const startDate = new Date(TOGETHER_START)
 const togetherDays = computed(() => {
   const now = new Date()
   return Math.floor((now - startDate) / (1000 * 60 * 60 * 24))
@@ -70,7 +70,7 @@ async function logout() {
     </div>
 
     <h1>心动告白</h1>
-    <p class="signature">在一起 {{ togetherDays }} 天 ❤️</p>
+    <button class="signature signature-btn" type="button" :title="`查看 ${TOGETHER_START}`" @click="router.push(`/day/${TOGETHER_START}`)">在一起 {{ togetherDays }} 天 ❤️</button>
 
     <div class="heart-container">
       <div class="heart">
@@ -94,9 +94,6 @@ async function logout() {
       </div>
     </div>
 
-    <!-- 侧边导航栏 -->
-    <NavSidebar />
-
     <!-- 天气卡片 -->
     <WeatherCard ref="weatherRef" />
 
@@ -113,13 +110,16 @@ async function logout() {
   <div v-if="musicStore.bgmBlocked" class="bgm-hint" @click="musicStore.resumeBgm">
     🎵 点击播放 {{ musicStore.bgm?.title || '背景音乐' }}
   </div>
+  <div v-else-if="musicStore.playError" class="bgm-hint is-error">
+    ⚠️ {{ musicStore.playError }}
+  </div>
 </template>
 
 <style scoped>
 .stage {
   position: relative;
   text-align: center;
-  padding: 36px 24px 200px;
+  padding: calc(36px + var(--safe-top)) 24px 200px;
   z-index: 2;
   max-width: 800px;
   margin: 0 auto;
@@ -127,8 +127,8 @@ async function logout() {
 
 .corner-actions {
   position: fixed;
-  top: 16px;
-  right: 20px;
+  top: calc(16px + var(--safe-top));
+  right: calc(20px + var(--safe-right));
   z-index: 10;
   display: flex;
   gap: 8px;
@@ -153,6 +153,21 @@ h1 {
   line-height: 1.6;
   font-weight: 300;
   margin-bottom: 20px;
+}
+
+.signature-btn {
+  display: inline-block;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.signature-btn:hover {
+  opacity: 1;
+  text-decoration: underline;
+  text-underline-offset: 6px;
 }
 
 /* Heart */
@@ -371,7 +386,7 @@ h1 {
 
 /* Play Button */
 .play-button {
-  position: fixed; right: 32px; bottom: 32px; z-index: 4;
+  position: fixed; right: var(--fab-right); bottom: var(--fab-bottom); z-index: 4;
   width: 64px; height: 64px; border-radius: 50%; border: none;
   background: linear-gradient(135deg, var(--primary), var(--secondary));
   color: #fff; font-size: 24px; cursor: pointer;
@@ -395,22 +410,30 @@ h1 {
 .play-button span { position: relative; z-index: 1; }
 
 .bgm-hint {
-  position: fixed; right: 108px; bottom: 44px; z-index: 4;
+  position: fixed; right: calc(var(--fab-right) + 76px); bottom: calc(var(--fab-bottom) + 12px); z-index: 4;
   padding: 8px 14px; border-radius: 999px;
   background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 13px;
   cursor: pointer; backdrop-filter: blur(6px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 
+.bgm-hint.is-error {
+  cursor: default;
+  background: rgba(120, 30, 40, 0.75);
+}
+
 /* Mobile */
 @media (max-width: 720px) {
   .stage {
-    padding: 24px 16px 160px;
+    padding: calc(56px + var(--safe-top)) 16px calc(var(--tabbar-height) + 96px);
   }
 
   .corner-actions {
-    top: 10px;
-    right: 12px;
+    top: calc(8px + var(--safe-top));
+    right: calc(10px + var(--safe-right));
+    max-width: calc(100vw - 20px);
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .heart-container {
@@ -442,8 +465,6 @@ h1 {
   }
 
   .play-button {
-    right: 16px;
-    bottom: 16px;
     width: 52px;
     height: 52px;
     font-size: 20px;

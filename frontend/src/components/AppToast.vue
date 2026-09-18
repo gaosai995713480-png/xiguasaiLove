@@ -18,7 +18,7 @@ const { toast } = useToast()
 <style scoped>
 .app-toast {
   position: fixed;
-  top: 24px;
+  top: calc(16px + var(--safe-top));
   left: 50%;
   transform: translateX(-50%);
   z-index: 9999;

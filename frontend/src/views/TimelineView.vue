@@ -55,6 +55,8 @@ onMounted(load)
       :key="item.id"
       class="timeline-card"
       :style="{ animationDelay: `${i * 0.1}s` }"
+      :title="item.event_date ? '查看这一天' : ''"
+      @click="item.event_date && router.push(`/day/${item.event_date}`)"
     >
       <div class="dot"></div>
       <div class="icon">{{ item.icon || '💕' }}</div>
@@ -62,7 +64,7 @@ onMounted(load)
       <div class="title">{{ item.title }}</div>
       <div v-if="item.content" class="content">{{ item.content }}</div>
       <img v-if="item.photo_url" class="photo" :src="item.photo_url" alt="" />
-      <button v-if="authStore.isAdmin" class="delete-btn" @click="remove(item.id)">✕</button>
+      <button v-if="authStore.isAdmin" class="delete-btn" @click.stop="remove(item.id)">✕</button>
     </div>
   </div>
 
@@ -95,10 +97,10 @@ onMounted(load)
 <style scoped>
 .add-btn { margin-left: auto; font-size: 14px; padding: 8px 18px; }
 
-.timeline-wrap { max-width: 900px; margin: 0 auto; padding: 90px 24px 60px; position: relative; }
+.timeline-wrap { max-width: 900px; margin: 0 auto; padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom); position: relative; }
 
 .timeline-line {
-  position: absolute; left: 50%; top: 90px; bottom: 60px; width: 3px;
+  position: absolute; left: 50%; top: var(--page-pad-top); bottom: var(--page-pad-bottom); width: 3px;
   background: linear-gradient(180deg, rgba(255, 107, 157, 0.6), rgba(196, 69, 105, 0.2));
   transform: translateX(-50%); border-radius: 2px;
 }
@@ -110,6 +112,7 @@ onMounted(load)
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
   opacity: 0; transform: translateX(-30px);
   animation: slide-in 0.5s ease forwards;
+  cursor: pointer;
 }
 
 .timeline-card:nth-child(even) { margin-left: 6%; }
@@ -164,5 +167,9 @@ onMounted(load)
   .timeline-card { width: calc(100% - 50px); margin-left: 50px !important; transform: translateX(20px); }
   .timeline-card:nth-child(odd) { transform: translateX(20px); animation-name: slide-in; }
   .dot { left: -36px !important; right: auto !important; }
+}
+
+@media (hover: none) {
+  .delete-btn { opacity: 0.7; }
 }
 </style>

@@ -152,13 +152,14 @@ onMounted(loadMonth)
     <input class="note-input" v-model="noteInput" placeholder="一句话记录今天..." maxlength="200" />
     <div class="modal-actions">
       <button class="btn-cancel" @click="showModal = false">取消</button>
+      <button class="btn-cancel" type="button" @click="router.push(`/day/${selectedDate}`)">查看这一天</button>
       <button class="btn-primary" @click="save">打卡</button>
     </div>
   </GlassModal>
 </template>
 
 <style scoped>
-.container { max-width: 700px; margin: 0 auto; padding: 90px 20px 60px; }
+.container { max-width: 700px; margin: 0 auto; padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom); }
 
 .stats { display: flex; gap: 14px; margin-bottom: 28px; flex-wrap: wrap; }
 .stat-card { flex: 1; min-width: 120px; padding: 18px; border-radius: 16px; background: var(--glass-bg); backdrop-filter: blur(20px); border: 1px solid var(--glass-border); text-align: center; }
@@ -167,7 +168,7 @@ onMounted(loadMonth)
 .stat-card .sub { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
 
 .cal-header { display: flex; align-items: center; justify-content: center; gap: 20px; margin-bottom: 20px; }
-.cal-header button { width: 36px; height: 36px; border-radius: 50%; border: none; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 18px; cursor: pointer; transition: all 0.2s; }
+.cal-header button { width: var(--touch-min); height: var(--touch-min); border-radius: 50%; border: none; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 18px; cursor: pointer; transition: all 0.2s; }
 .cal-header button:hover { background: rgba(255, 255, 255, 0.2); }
 .month-label { font-size: 20px; font-weight: 700; min-width: 140px; text-align: center; }
 
@@ -208,15 +209,11 @@ onMounted(loadMonth)
 .note-input { width: 100%; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.06); color: #fff; font-size: 14px; outline: none; margin-bottom: 16px; }
 .note-input:focus { border-color: var(--primary); }
 
-.modal-actions { display: flex; gap: 10px; }
+.modal-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .modal-actions button { flex: 1; padding: 10px; border-radius: 12px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; }
 .btn-cancel { background: rgba(255, 255, 255, 0.1); color: #fff; }
 
 @media (max-width: 720px) {
-  .container {
-    padding: 72px 12px 40px;
-  }
-
   .cal-grid {
     padding: 14px;
     gap: 6px;
@@ -247,13 +244,29 @@ onMounted(loadMonth)
   }
 
   .level-btn {
-    width: 36px;
-    height: 36px;
+    width: var(--touch-min);
+    height: var(--touch-min);
     font-size: 13px;
   }
 
   .month-label {
-    font-size: 18px;
+    font-size: 16px;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 380px) {
+  .cal-grid {
+    padding: 8px;
+    gap: 4px;
+  }
+
+  .cal-day .emoji {
+    font-size: 13px;
+  }
+
+  .cal-day .day-num {
+    font-size: 10px;
   }
 }
 </style>

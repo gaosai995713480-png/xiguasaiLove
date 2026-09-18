@@ -712,8 +712,8 @@ onUnmounted(() => {
 
 .express-page {
   max-width: 640px;
-  margin: 72px auto 40px;
-  padding: 0 16px;
+  margin: 0 auto;
+  padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom);
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1275,8 +1275,6 @@ onUnmounted(() => {
 /* 移动端适配 */
 @media (max-width: 720px) {
   .express-page {
-    margin-top: 60px;
-    padding: 0 12px;
     gap: 12px;
   }
 

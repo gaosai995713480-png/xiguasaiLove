@@ -341,6 +341,7 @@ onUnmounted(() => {
     <div class="detail-date">{{ selectedMarker.visit_date ? `📅 ${selectedMarker.visit_date}` : '' }}</div>
     <div class="detail-note">{{ selectedMarker.note || '暂无备注' }}</div>
     <div class="detail-actions">
+      <button v-if="selectedMarker.visit_date" class="btn-edit" @click="router.push(`/day/${selectedMarker.visit_date}`)">📅 这一天</button>
       <button v-if="authStore.isAdmin" class="btn-edit" @click="editDetail">✏️ 编辑</button>
       <button v-if="authStore.isAdmin" class="btn-delete" @click="deleteDetail">🗑️ 删除</button>
     </div>
@@ -391,9 +392,9 @@ onUnmounted(() => {
 <style scoped>
 .marker-count { margin-left: auto; font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
 
-#map-container { position: fixed; top: 56px; left: 0; right: 0; bottom: 0; }
+#map-container { position: fixed; top: var(--topbar-height); left: 0; right: 0; bottom: var(--tabbar-height); }
 
-.search-wrap { position: fixed; top: 70px; left: 16px; right: 16px; z-index: 15; }
+.search-wrap { position: fixed; top: calc(var(--topbar-height) + 12px); left: 16px; right: 16px; z-index: 15; }
 .search-box { display: flex; align-items: center; gap: 8px; background: var(--glass-bg); backdrop-filter: blur(20px); border: 1px solid var(--glass-border); border-radius: 14px; padding: 8px 16px; }
 .search-box input { flex: 1; border: none; background: transparent; outline: none; font-size: 15px; color: var(--text-primary); }
 .search-box input::placeholder { color: var(--text-secondary); }
@@ -405,20 +406,20 @@ onUnmounted(() => {
 .search-result-name { font-weight: 600; }
 .search-result-addr { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 
-.fab-add { position: fixed; bottom: 30px; right: 20px; z-index: 15; width: 56px; height: 56px; border-radius: 50%; border: none; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: #fff; font-size: 28px; cursor: pointer; box-shadow: 0 6px 24px rgba(255, 107, 157, 0.4); transition: all 0.25s; display: flex; align-items: center; justify-content: center; }
+.fab-add { position: fixed; bottom: var(--fab-bottom); right: var(--fab-right); z-index: 15; width: 56px; height: 56px; border-radius: 50%; border: none; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: #fff; font-size: 28px; cursor: pointer; box-shadow: 0 6px 24px rgba(255, 107, 157, 0.4); transition: all 0.25s; display: flex; align-items: center; justify-content: center; }
 .fab-add:hover { transform: scale(1.1); }
 
 /* Detail Card */
 .detail-backdrop { position: fixed; inset: 0; z-index: 25; background: rgba(0, 0, 0, 0.4); opacity: 0; pointer-events: none; transition: opacity 0.3s; }
 .detail-backdrop.is-visible { opacity: 1; pointer-events: auto; }
-.detail-card { position: fixed; bottom: 0; left: 0; right: 0; z-index: 30; background: rgba(30, 30, 50, 0.95); backdrop-filter: blur(30px); border-top: 1px solid var(--glass-border); border-radius: 24px 24px 0 0; padding: 20px 24px 36px; transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1); max-height: 70vh; overflow-y: auto; }
+.detail-card { position: fixed; bottom: 0; left: 0; right: 0; z-index: 30; background: rgba(30, 30, 50, 0.95); backdrop-filter: blur(30px); border-top: 1px solid var(--glass-border); border-radius: 24px 24px 0 0; padding: 20px 24px calc(36px + var(--safe-bottom)); transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1); max-height: 70dvh; overflow-y: auto; }
 .detail-card.is-visible { transform: translateY(0); }
 .detail-handle { width: 40px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.2); margin: 0 auto 16px; }
 .detail-photo { width: 100%; max-height: 240px; object-fit: cover; border-radius: 16px; margin-bottom: 16px; }
 .detail-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
 .detail-date { font-size: 13px; color: var(--accent); margin-bottom: 10px; }
 .detail-note { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
-.detail-actions { display: flex; gap: 12px; }
+.detail-actions { display: flex; gap: 12px; flex-wrap: wrap; }
 .detail-actions button { flex: 1; padding: 12px; border-radius: 12px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
 .btn-edit { background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2) !important; }
 .btn-edit:hover { background: rgba(255, 255, 255, 0.18); }
@@ -439,12 +440,7 @@ onUnmounted(() => {
 :deep(.love-marker:hover) { transform: scale(1.3); }
 
 @media (max-width: 720px) {
-  #map-container {
-    top: 50px;
-  }
-
   .search-wrap {
-    top: 58px;
     left: 10px;
     right: 10px;
   }
@@ -455,19 +451,17 @@ onUnmounted(() => {
   }
 
   .search-box input {
-    font-size: 14px;
+    font-size: 16px;
   }
 
   .fab-add {
     width: 48px;
     height: 48px;
-    bottom: 20px;
-    right: 14px;
     font-size: 24px;
   }
 
   .detail-card {
-    padding: 16px 18px 28px;
+    padding: 16px 18px calc(16px + var(--tabbar-height));
   }
 
   .detail-title {

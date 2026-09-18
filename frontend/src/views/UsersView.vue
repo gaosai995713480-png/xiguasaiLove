@@ -228,7 +228,7 @@ onMounted(() => {
 .users-page {
   max-width: 960px;
   margin: 0 auto;
-  padding: 80px 16px 60px; /* 增加顶部内边距避开 TopBar */
+  padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom);
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -432,7 +432,6 @@ onMounted(() => {
 .btn-enable:hover { background: rgba(52, 211, 153, 0.2); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(52, 211, 153, 0.2); }
 
 @media (max-width: 600px) {
-  .users-page { padding: 70px 12px 60px; }
   .user-table { font-size: 13px; }
   .user-table th, .user-table td { padding: 12px 8px; }
   .glass-card { padding: 20px; }

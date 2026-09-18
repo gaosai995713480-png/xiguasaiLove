@@ -115,8 +115,8 @@ onUnmounted(() => { if (typingTimer) clearTimeout(typingTimer) })
 .replay-btn { margin-left: auto; font-size: 13px; }
 
 .letter-nav {
-  display: flex; gap: 8px; margin: 80px auto 20px;
-  max-width: 640px; width: 90%; justify-content: center; flex-wrap: wrap;
+  display: flex; gap: 8px; margin: var(--page-pad-top) auto 20px;
+  max-width: 640px; width: min(640px, calc(100% - 2 * var(--page-pad-x))); justify-content: center; flex-wrap: wrap;
 }
 
 .letter-tab {
@@ -127,7 +127,7 @@ onUnmounted(() => { if (typingTimer) clearTimeout(typingTimer) })
 .letter-tab.is-active { background: rgba(255, 255, 255, 0.15); color: #fff; border-color: var(--primary); }
 
 .letter-wrap {
-  max-width: 640px; width: 90%; margin: 0 auto 60px; padding: 40px;
+  max-width: 640px; width: min(640px, calc(100% - 2 * var(--page-pad-x))); margin: 0 auto var(--page-pad-bottom); padding: 40px;
   background: var(--glass-bg); backdrop-filter: blur(30px);
   border: 1px solid var(--glass-border); border-radius: 24px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3); position: relative;
@@ -158,7 +158,8 @@ onUnmounted(() => { if (typingTimer) clearTimeout(typingTimer) })
 .letter-sign.is-visible { opacity: 1; }
 
 @media (max-width: 720px) {
-  .letter-wrap { margin-top: 20px; padding: 28px 24px; }
+  .letter-tab { min-height: var(--touch-min); }
+  .letter-wrap { margin-top: 12px; padding: 28px 20px; }
   .letter-body { font-size: 15px; line-height: 1.9; }
 }
 </style>

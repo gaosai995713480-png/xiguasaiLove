@@ -48,7 +48,7 @@ function onBackdropClick(e) {
 .modal-card {
   width: 92%;
   max-width: 480px;
-  max-height: 85vh;
+  max-height: min(85dvh, calc(100dvh - var(--safe-top) - var(--safe-bottom) - 24px));
   overflow-y: auto;
   background: rgba(30, 30, 50, 0.96);
   backdrop-filter: blur(40px);
@@ -75,10 +75,16 @@ h2 {
 }
 
 @media (max-width: 720px) {
+  .modal-backdrop {
+    align-items: flex-end;
+  }
+
   .modal-card {
-    width: 95%;
-    padding: 22px 16px;
-    border-radius: 20px;
+    width: 100%;
+    max-width: none;
+    padding: 22px 16px calc(16px + var(--safe-bottom));
+    border-radius: 20px 20px 0 0;
+    max-height: calc(100dvh - var(--safe-top) - 12px);
   }
 
   h2 {

@@ -361,8 +361,8 @@ onMounted(async () => {
 
 <style scoped>
 .cookbook-page {
-  min-height: 100vh;
-  padding: 28px;
+  min-height: 100dvh;
+  padding: calc(28px + var(--safe-top)) 28px calc(28px + var(--safe-bottom));
   color: var(--text-primary);
 }
 
@@ -612,6 +612,34 @@ textarea {
 
   .detail-card {
     position: static;
+  }
+}
+
+@media (max-width: 720px) {
+  .cookbook-page {
+    padding: calc(12px + var(--safe-top)) 14px var(--page-pad-bottom);
+  }
+
+  .hero {
+    padding: 20px 16px;
+  }
+
+  .hero h1 {
+    font-size: clamp(28px, 10vw, 40px);
+  }
+
+  .tabs,
+  .hero-actions {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+
+  .tabs button,
+  .hero-actions button {
+    flex-shrink: 0;
+    min-height: var(--touch-min);
   }
 }
 </style>

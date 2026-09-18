@@ -246,7 +246,7 @@ onMounted(() => loadRequests())
 .jukebox-container {
   max-width: 640px;
   margin: 0 auto;
-  padding: 90px 20px 60px;
+  padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom);
 }
 
 .section-title {
@@ -447,10 +447,6 @@ onMounted(() => loadRequests())
 
 /* Mobile */
 @media (max-width: 720px) {
-  .jukebox-container {
-    padding: 72px 14px 50px;
-  }
-
   .search-section,
   .request-section {
     padding: 18px 14px;

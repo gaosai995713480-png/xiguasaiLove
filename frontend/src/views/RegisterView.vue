@@ -100,7 +100,9 @@ async function handleRegister() {
   z-index: 1;
   margin: auto;
   min-height: 100vh;
+  min-height: 100dvh;
   align-content: center;
+  padding: calc(16px + var(--safe-top)) 0 calc(16px + var(--safe-bottom));
 }
 
 .hero, .panel {

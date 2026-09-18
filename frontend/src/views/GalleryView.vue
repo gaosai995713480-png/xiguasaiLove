@@ -5,6 +5,7 @@ import TopBar from '../components/TopBar.vue'
 import { photoApi, galleryApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 import { useContextStore } from '../stores/context'
+import { photoDay } from '../utils/dayDate'
 
 const authStore = useAuthStore()
 const contextStore = useContextStore()
@@ -81,6 +82,11 @@ function openLightbox(index) {
   lightboxActive.value = true
   document.body.style.overflow = 'hidden'
   updateGalleryContext()
+}
+
+function goPhotoDay(photo) {
+  const date = photoDay(photo?.created_at)
+  if (date) router.push(`/day/${date}`)
 }
 
 function closeLightbox() {
@@ -235,7 +241,7 @@ onBeforeUnmount(() => {
       >
         <img :src="photo.thumbnail_url || photo.url" :alt="photo.description || `照片 ${i + 1}`" loading="lazy" />
         <div class="photo-info" v-if="photo.description || photo.created_at">
-          <p class="photo-date">{{ photo.created_at?.split(' ')[0] || '' }}</p>
+          <p class="photo-date" v-if="photoDay(photo.created_at)" @click.stop="goPhotoDay(photo)">{{ photoDay(photo.created_at) }}</p>
           <p class="photo-desc" v-if="photo.description">{{ photo.description }}</p>
         </div>
       </div>
@@ -264,6 +270,11 @@ onBeforeUnmount(() => {
         <button class="lightbox-nav lightbox-next" @click="navigate(1)">›</button>
         <div class="lightbox-bottom">
           <div class="lightbox-counter">{{ currentIndex + 1 }} / {{ photos.length }}</div>
+          <button
+            v-if="photoDay(photos[currentIndex]?.created_at)"
+            class="lightbox-day"
+            @click.stop="goPhotoDay(photos[currentIndex])"
+          >📅 这一天</button>
           <button
             v-if="authStore.isAdmin"
             class="lightbox-delete"
@@ -418,14 +429,14 @@ onBeforeUnmount(() => {
 
 .gallery-error {
   max-width: 1400px;
-  margin: 88px auto 0;
-  padding: 0 24px;
+  margin: var(--page-pad-top) auto 0;
+  padding: 0 var(--page-pad-x);
   color: #ff7b7b;
   font-size: 14px;
 }
 
 .gallery {
-  padding: 80px 24px 40px;
+  padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom);
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 20px;
@@ -466,6 +477,11 @@ onBeforeUnmount(() => {
   color: rgba(255, 255, 255, 0.35);
   margin: 0 0 4px 0;
   letter-spacing: 0.5px;
+  cursor: pointer;
+}
+
+.photo-date:hover {
+  color: var(--accent, #ffd6e7);
 }
 
 .photo-desc {
@@ -531,7 +547,7 @@ onBeforeUnmount(() => {
 }
 
 .lightbox-close {
-  position: absolute; top: 20px; right: 24px;
+  position: absolute; top: calc(12px + var(--safe-top)); right: calc(16px + var(--safe-right));
   width: 44px; height: 44px; border-radius: 50%;
   background: rgba(255, 255, 255, 0.15); border: none;
   color: #fff; font-size: 22px; cursor: pointer;
@@ -551,11 +567,11 @@ onBeforeUnmount(() => {
 }
 
 .lightbox-nav:hover { background: rgba(255, 255, 255, 0.25); }
-.lightbox-prev { left: 20px; }
-.lightbox-next { right: 20px; }
+.lightbox-prev { left: max(12px, var(--safe-left)); }
+.lightbox-next { right: max(12px, var(--safe-right)); }
 
 .lightbox-bottom {
-  position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+  position: absolute; bottom: calc(16px + var(--safe-bottom)); left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 16px;
 }
 
@@ -574,9 +590,17 @@ onBeforeUnmount(() => {
 .lightbox-delete:hover:not(:disabled) { background: rgba(220, 50, 50, 0.9); }
 .lightbox-delete:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.lightbox-day {
+  padding: 6px 16px; border-radius: 20px;
+  background: rgba(255, 255, 255, 0.16); border: none;
+  color: #fff; font-size: 13px; cursor: pointer;
+  transition: all 0.2s; white-space: nowrap;
+}
+
+.lightbox-day:hover { background: rgba(255, 255, 255, 0.28); }
+
 @media (max-width: 1100px) { .gallery { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 768px) { .gallery { grid-template-columns: repeat(2, 1fr); padding-top: 70px; gap: 16px; } }
-@media (max-width: 480px) { .gallery { grid-template-columns: repeat(1, 1fr); gap: 12px; padding: 60px 16px 30px; } }
+@media (max-width: 720px) { .gallery { grid-template-columns: repeat(2, 1fr); gap: 10px; } }
 /* ===== 上传/导入按钮 ===== */
 .gallery-action-btn {
   padding: 6px 14px;
@@ -594,10 +618,11 @@ onBeforeUnmount(() => {
 .gallery-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 @media (max-width: 720px) {
-  .gallery-error { margin-top: 78px; padding: 0 12px; font-size: 13px; }
-  .gallery { column-count: 2; padding: 72px 12px 24px; column-gap: 10px; }
-  .gallery-item { margin-bottom: 10px; border-radius: 12px; }
+  .gallery-error { font-size: 13px; }
+  .gallery-item { border-radius: 12px; }
   .lock-card { padding: 36px 20px 28px; }
-  .gallery-action-btn { padding: 4px 10px; font-size: 12px; }
+  .gallery-action-btn { padding: 8px 10px; font-size: 12px; min-height: var(--touch-min); }
+  .photo-count { display: none; }
+  .empty-state { padding: var(--page-pad-top) 24px var(--page-pad-bottom); }
 }
 </style>

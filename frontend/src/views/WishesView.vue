@@ -139,7 +139,7 @@ onUnmounted(() => {
 }
 
 .hint {
-  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  position: fixed; bottom: calc(24px + var(--tabbar-height)); left: 50%; transform: translateX(-50%);
   font-size: 13px; color: rgba(255, 255, 255, 0.35); z-index: 5;
   pointer-events: none; animation: pulse 3s ease-in-out infinite;
 }
@@ -213,7 +213,7 @@ onUnmounted(() => {
     left: 16px !important;
     right: 16px !important;
     top: auto !important;
-    bottom: 20px !important;
+    bottom: calc(12px + var(--tabbar-height)) !important;
     display: flex;
     gap: 8px;
     align-items: center;
@@ -229,10 +229,11 @@ onUnmounted(() => {
     width: auto;
     padding: 8px 16px;
     white-space: nowrap;
+    min-height: var(--touch-min);
   }
 
   .hint {
-    bottom: 80px;
+    bottom: calc(80px + var(--tabbar-height));
   }
 }
 </style>

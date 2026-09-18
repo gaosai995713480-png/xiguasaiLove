@@ -8,6 +8,7 @@
   <MeteorShower v-if="currentEffect === 'meteors'" />
   <AppToast />
   <router-view />
+  <NavSidebar v-if="authStore.authenticated" />
   <!-- AI 聊天悬浮组件 - 全局常驻，登录后可用 -->
   <AiChatWidget v-if="authStore.authenticated" />
 </template>
@@ -25,6 +26,7 @@ import FallingPetals from './components/FallingPetals.vue'
 import FirefliesEffect from './components/FirefliesEffect.vue'
 import MeteorShower from './components/MeteorShower.vue'
 import AiChatWidget from './components/AiChatWidget.vue'
+import NavSidebar from './components/NavSidebar.vue'
 
 const themeStore = useThemeStore()
 const authStore = useAuthStore()

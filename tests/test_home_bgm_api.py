@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -145,6 +147,65 @@ def test_switching_bgm_removes_previous_local_file(local_storage, restore_bgm):
         assert not old_file.exists()
     finally:
         old_file.unlink(missing_ok=True)
+
+
+def test_oss_bgm_missing_object_is_disabled(restore_bgm, monkeypatch):
+    class FakeBucket:
+        def object_exists(self, key):
+            return False
+
+        def sign_url(self, *args, **kwargs):
+            raise AssertionError("missing object must not be signed")
+
+    monkeypatch.setattr(music, "get_oss_bucket", lambda: FakeBucket())
+    set_config(
+        music.BGM_CONFIG_KEY,
+        json.dumps(
+            {
+                "source": "local",
+                "storage": "oss",
+                "audio_key": "missing.mp3",
+                "title": "gone",
+                "artist": "x",
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    data = _client_with_role("visitor").get("/api/music/bgm").json()
+    assert data == {"enabled": False}
+
+
+def test_oss_bgm_existing_object_returns_signed_url(restore_bgm, monkeypatch):
+    class FakeBucket:
+        def object_exists(self, key):
+            assert key == "music/ok.mp3"
+            return True
+
+        def sign_url(self, method, key, expires, slash_safe=False):
+            assert method == "GET"
+            assert key == "music/ok.mp3"
+            return "https://oss.example/music/ok.mp3"
+
+    monkeypatch.setattr(music, "get_oss_bucket", lambda: FakeBucket())
+    set_config(
+        music.BGM_CONFIG_KEY,
+        json.dumps(
+            {
+                "source": "local",
+                "storage": "oss",
+                "audio_key": "ok.mp3",
+                "title": "ok",
+                "artist": "band",
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    data = _client_with_role("visitor").get("/api/music/bgm").json()
+    assert data["enabled"] is True
+    assert data["url"] == "https://oss.example/music/ok.mp3"
+    assert data["title"] == "ok"
 
 
 def test_meting_bgm_returns_resolved_url(restore_bgm, monkeypatch):

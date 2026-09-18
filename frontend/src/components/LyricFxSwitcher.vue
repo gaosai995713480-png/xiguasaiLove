@@ -50,8 +50,8 @@ function onClickOutside() {
 }
 
 .fx-btn {
-  width: 36px;
-  height: 36px;
+  width: var(--touch-min);
+  height: var(--touch-min);
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.1);

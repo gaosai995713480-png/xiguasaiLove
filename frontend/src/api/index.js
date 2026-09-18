@@ -178,6 +178,10 @@ export const wishApi = {
   create: (data) => post('/api/wishes', data),
 }
 
+export const dayApi = {
+  get: (date) => get(`/api/day/${encodeURIComponent(date)}`),
+}
+
 export const mapApi = {
   list: () => get('/api/map'),
   create: (data) => post('/api/map', data),

@@ -7,8 +7,17 @@
   padding: 0;
 }
 
-body {
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html, body, #app {
   min-height: 100vh;
+  min-height: 100dvh;
+}
+
+body {
   background: linear-gradient(-45deg, var(--bg-grad-1), var(--bg-grad-2), var(--bg-grad-3), var(--bg-grad-4));
   background-size: 400% 400%;
   animation: gradient-shift 15s ease infinite;
@@ -45,11 +54,6 @@ button { font-family: inherit; }
   transition: all 0.2s ease;
 }
 
-.btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(255, 107, 157, 0.4);
-}
-
 .btn-ghost {
   border: 1px solid rgba(255, 255, 255, 0.2);
   padding: 8px 16px;
@@ -61,12 +65,26 @@ button { font-family: inherit; }
   transition: all 0.2s ease;
 }
 
-.btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.18);
-  transform: translateY(-1px);
+@media (hover: hover) {
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(255, 107, 157, 0.4);
+  }
+
+  .btn-ghost:hover {
+    background: rgba(255, 255, 255, 0.18);
+    transform: translateY(-1px);
+  }
 }
 
-/* 移动端触屏优化 */
+@media (hover: none) {
+  .btn-primary:active,
+  .btn-ghost:active {
+    transform: scale(0.98);
+  }
+}
+
+/* 触屏：取消 300ms 点击延迟、保证 44px 热区、输入框不触发 iOS 自动放大 */
 @media (max-width: 720px) {
   * {
     -webkit-tap-highlight-color: transparent;
@@ -76,8 +94,15 @@ button { font-family: inherit; }
     touch-action: manipulation;
   }
 
-  button, a, [role="button"] {
-    min-height: 36px;
+  button,
+  [role="button"],
+  .btn-primary,
+  .btn-ghost {
+    min-height: var(--touch-min);
+  }
+
+  input, select, textarea {
+    font-size: 16px !important;
   }
 
   .btn-primary {

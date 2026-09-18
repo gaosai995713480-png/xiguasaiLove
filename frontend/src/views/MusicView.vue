@@ -404,7 +404,7 @@ onMounted(() => musicStore.loadSongs())
 <style scoped>
 .add-btn { margin-left: auto; font-size: 14px; padding: 8px 18px; }
 
-.music-container { max-width: 600px; margin: 0 auto; padding: 90px 20px 60px; }
+.music-container { max-width: 600px; margin: 0 auto; padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom); }
 
 .player-card {
   background: var(--glass-bg); backdrop-filter: blur(26px);
@@ -562,10 +562,6 @@ onMounted(() => musicStore.loadSongs())
 }
 
 @media (max-width: 720px) {
-  .music-container {
-    padding: 72px 14px 50px;
-  }
-
   .player-card {
     padding: 20px 16px;
     border-radius: 20px;
@@ -591,14 +587,14 @@ onMounted(() => musicStore.loadSongs())
   }
 
   .ctrl-btn {
-    width: 40px;
-    height: 40px;
+    width: var(--touch-min);
+    height: var(--touch-min);
     font-size: 16px;
   }
 
   .play-btn {
-    width: 50px;
-    height: 50px;
+    width: 56px;
+    height: 56px;
     font-size: 20px;
   }
 

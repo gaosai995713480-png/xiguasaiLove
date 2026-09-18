@@ -1147,8 +1147,8 @@ function applyInline(text) {
 /* ===== 悬浮气泡 ===== */
 .ai-fab {
   position: fixed;
-  right: 32px;
-  bottom: 108px;
+  right: var(--fab-right);
+  bottom: calc(var(--fab-bottom) + 76px);
   z-index: 50;
   width: 56px;
   height: 56px;
@@ -1751,8 +1751,30 @@ function applyInline(text) {
 
 /* ===== 移动端 ===== */
 @media (max-width: 720px) {
-  .ai-fab { right: 16px; bottom: 80px; width: 48px; height: 48px; font-size: 20px; }
-  .ai-chat-panel { right: 0; bottom: 0; width: 100vw; height: 100vh; border-radius: 0 !important; z-index: 200; }
+  .ai-fab {
+    width: 48px;
+    height: 48px;
+    font-size: 20px;
+    bottom: calc(var(--fab-bottom) + 64px);
+  }
+
+  .ai-chat-panel {
+    inset: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100dvh;
+    border-radius: 0 !important;
+    z-index: 200;
+  }
+
+  .chat-header {
+    padding-top: calc(10px + var(--safe-top));
+  }
+
+  .chat-input-bar {
+    padding-bottom: calc(12px + var(--safe-bottom));
+  }
 }
 
 /* ===== Toggle Switch ===== */

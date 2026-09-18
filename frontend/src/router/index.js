@@ -35,6 +35,11 @@ const routes = [
     component: () => import('../views/TimelineView.vue'),
   },
   {
+    path: '/day/:date',
+    name: 'DayDetail',
+    component: () => import('../views/DayDetailView.vue'),
+  },
+  {
     path: '/letter',
     name: 'Letter',
     component: () => import('../views/LetterView.vue'),
@@ -133,6 +138,7 @@ router.afterEach((to) => {
       Gallery: "相册",
       Music: "音乐盒",
       Timeline: "时光轴",
+      DayDetail: "这一天",
       Letter: "告白信",
       Mood: "心情打卡",
       Wishes: "星空心愿",

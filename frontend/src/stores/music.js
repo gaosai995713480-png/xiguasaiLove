@@ -18,6 +18,12 @@ export const useMusicStore = defineStore('music', () => {
   const audio = markRaw(new Audio())
   audio.preload = 'auto'
 
+  function toHttpsMediaUrl(url) {
+    return typeof url === 'string' && url.startsWith('http://')
+      ? `https://${url.slice(7)}`
+      : url
+  }
+
   const PLATFORM_NAMES = {
     netease: '网易云', tencent: 'QQ音乐',
     kugou: '酷狗', kuwo: '酷我', baidu: '千千',
@@ -68,6 +74,13 @@ export const useMusicStore = defineStore('music', () => {
     next()
   })
 
+  audio.addEventListener('error', () => {
+    if (!bgm.value && !isPlaying.value) return
+    isPlaying.value = false
+    bgmBlocked.value = false
+    playError.value = '音频加载失败'
+  })
+
   function updateLyricHighlight(time) {
     if (lyricLines.value.length === 0) return
     let idx = -1
@@ -109,14 +122,18 @@ export const useMusicStore = defineStore('music', () => {
     try {
       const data = await musicApi.url(s.netease_id, s.platform || 'netease')
       if (data.url) {
-        audio.src = data.url
+        audio.src = toHttpsMediaUrl(data.url)
         // B5: 统一 try/catch 处理浏览器播放拒绝
         try {
           await audio.play()
           isPlaying.value = true
-        } catch {
+        } catch (e) {
           isPlaying.value = false
-          playError.value = '浏览器阻止自动播放，请手动点击播放'
+          if (e.name === 'NotAllowedError') {
+            playError.value = '浏览器阻止自动播放，请手动点击播放'
+          } else if (e.name !== 'AbortError') {
+            playError.value = `音频加载失败（${e.name}）`
+          }
         }
       } else {
         // B1: 播放链接获取失败给用户反馈
@@ -153,7 +170,7 @@ export const useMusicStore = defineStore('music', () => {
       currentLyricIndex.value = -1
     }
 
-    audio.src = bgm.value.url
+    audio.src = toHttpsMediaUrl(bgm.value.url)
     audio.loop = true
     try {
       await audio.play()
@@ -161,11 +178,14 @@ export const useMusicStore = defineStore('music', () => {
       bgmBlocked.value = false
     } catch (e) {
       // NotAllowedError = 浏览器自动播放策略拦截，点一下即可；
-      // 其他错误（NotSupportedError/AbortError）说明音频源本身有问题，必须暴露出来
+      // AbortError = 被后续 startBgm/play 打断，忽略；
+      // 其他错误说明音频源本身有问题，不要伪装成“点一下就能播”
       console.warn('[BGM] 自动播放失败:', e.name, e.message, '音频源:', bgm.value.url)
       isPlaying.value = false
-      bgmBlocked.value = true
-      if (e.name !== 'NotAllowedError') {
+      if (e.name === 'NotAllowedError') {
+        bgmBlocked.value = true
+      } else if (e.name !== 'AbortError') {
+        bgmBlocked.value = false
         playError.value = `音频加载失败（${e.name}）`
       }
     }

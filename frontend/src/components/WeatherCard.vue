@@ -287,7 +287,7 @@ onUnmounted(() => {
 
 <style scoped>
 .weather-card {
-  position: fixed; left: 24px; top: 24px; z-index: 3;
+  position: fixed; left: calc(24px + var(--safe-left)); top: calc(24px + var(--safe-top)); z-index: 3;
   padding: 16px 20px; border-radius: 16px;
   background: var(--glass-bg); backdrop-filter: blur(20px);
   border: 1px solid var(--glass-border);
@@ -404,10 +404,10 @@ onUnmounted(() => {
   .weather-forecast { justify-content: center; overflow-x: auto; }
   .city-search-dropdown {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 101;
-    max-height: 55vh; border-radius: 20px 20px 0 0;
+    max-height: 55dvh; border-radius: 20px 20px 0 0;
     background: var(--glass-bg); backdrop-filter: blur(30px);
     border: 1px solid var(--glass-border);
-    padding: 12px 20px 20px; margin-top: 0;
+    padding: 12px 20px calc(20px + var(--safe-bottom)); margin-top: 0;
     box-shadow: 0 -8px 32px rgba(0,0,0,0.4);
     overflow-y: auto;
   }
