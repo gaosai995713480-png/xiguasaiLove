@@ -4,8 +4,9 @@ import time
 import logging
 from urllib.parse import unquote
 
+import httpx
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from ..database import get_db, get_config, set_config
 from ..config import settings
 from ..dependencies import require_auth, require_role
@@ -25,6 +26,15 @@ router = APIRouter(prefix="/api", tags=["music"])
 BGM_CONFIG_KEY = "HOME_BGM"
 # 上传音频体积上限，避免超大文件把整个请求体读进内存
 MAX_AUDIO_BYTES = 30 * 1024 * 1024
+_AUDIO_FETCH_HEADERS = {
+    "Referer": "https://music.163.com/",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    ),
+}
+_URL_CACHE_TTL = 120
+_url_cache: dict[tuple[str, str], tuple[float, str]] = {}
 
 
 @router.get("/music")
@@ -130,15 +140,34 @@ def to_https_media_url(url: str) -> str:
 
 
 def resolve_meting_url(song_id: str, platform: str) -> str:
-    """解析在线音乐平台的播放直链，失败时回退网易云外链"""
+    """解析在线音乐平台的真实 CDN 直链。
+
+    不再回退 music.163.com 外链：那条地址会 302 到 http 404 HTML，
+    Chrome 在 HTTPS 页面里会直接报 NotSupportedError。
+    """
+    cache_key = (str(song_id), platform)
+    cached = _url_cache.get(cache_key)
+    now = time.time()
+    if cached and cached[0] > now:
+        return cached[1]
+
     result = call_meting("url", platform=platform, id=song_id)
     url = ""
     if result.get("ok"):
         data = result.get("data", {})
         url = data.get("url", "") if isinstance(data, dict) else ""
-    if not url and platform == "netease":
-        url = f"https://music.163.com/song/media/outer/url?id={song_id}.mp3"
-    return to_https_media_url(url)
+    url = to_https_media_url(url)
+    if not url:
+        logger.warning("meting 未返回可播放直链 song_id=%s platform=%s", song_id, platform)
+        _url_cache[cache_key] = (now + 20, "")
+        return ""
+    _url_cache[cache_key] = (now + _URL_CACHE_TTL, url)
+    return url
+
+
+def playback_proxy_url(song_id: str, platform: str) -> str:
+    """给浏览器的同源播放地址，避免混合内容和错误 Referer。"""
+    return f"/api/music/stream?id={song_id}&platform={platform}"
 
 
 @router.get("/music/url")
@@ -147,7 +176,53 @@ def music_url(id: str = "", platform: str = "netease"):
         return {"error": "id is required"}, 400
     if platform not in METING_PLATFORMS:
         platform = "netease"
-    return {"url": resolve_meting_url(id, platform)}
+    if not resolve_meting_url(id, platform):
+        return {"url": ""}
+    return {"url": playback_proxy_url(id, platform)}
+
+
+@router.get("/music/stream")
+def music_stream(request: Request, id: str = "", platform: str = "netease"):
+    """把平台 CDN 音频同源转发给浏览器。"""
+    if not id:
+        return JSONResponse({"error": "id is required"}, status_code=400)
+    if platform not in METING_PLATFORMS:
+        platform = "netease"
+    url = resolve_meting_url(id, platform)
+    if not url:
+        return JSONResponse({"error": "暂无播放源"}, status_code=404)
+
+    headers = dict(_AUDIO_FETCH_HEADERS)
+    range_header = request.headers.get("range")
+    if range_header:
+        headers["Range"] = range_header
+    try:
+        upstream = httpx.get(url, headers=headers, follow_redirects=True, timeout=20)
+    except httpx.HTTPError:
+        logger.warning("拉取音源失败 song_id=%s", id, exc_info=True)
+        return JSONResponse({"error": "音源拉取失败"}, status_code=502)
+
+    content_type = (upstream.headers.get("content-type") or "audio/mpeg").split(";")[0]
+    if upstream.status_code >= 400 or content_type.startswith("text/"):
+        logger.warning(
+            "音源不可用 song_id=%s status=%s type=%s",
+            id,
+            upstream.status_code,
+            content_type,
+        )
+        return JSONResponse({"error": "音源不可用"}, status_code=502)
+
+    out_headers = {"Accept-Ranges": upstream.headers.get("accept-ranges", "bytes")}
+    if upstream.headers.get("content-range"):
+        out_headers["Content-Range"] = upstream.headers["content-range"]
+    if upstream.headers.get("content-length"):
+        out_headers["Content-Length"] = upstream.headers["content-length"]
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        media_type=content_type,
+        headers=out_headers,
+    )
 
 
 @router.get("/music/lyric")
@@ -230,7 +305,8 @@ def get_home_bgm(_=Depends(require_auth)):
     source = bgm.get("source", "")
     if source == "meting":
         platform = bgm.get("platform", "netease")
-        url = resolve_meting_url(str(bgm.get("song_id", "")), platform)
+        song_id = str(bgm.get("song_id", ""))
+        url = playback_proxy_url(song_id, platform) if resolve_meting_url(song_id, platform) else ""
     elif source == "local":
         platform = ""
         url = _local_audio_url(bgm.get("audio_key", ""), bgm.get("storage", "local"))

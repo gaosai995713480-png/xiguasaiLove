@@ -159,6 +159,39 @@ describe('useMusicStore', () => {
       expect(store.playError).toBe('')
     })
 
+    it('同源代理地址原样播放', async () => {
+      vi.mocked(musicApi.url).mockResolvedValue({
+        url: '/api/music/stream?id=1&platform=netease',
+      })
+      const store = useMusicStore()
+      store.songs = [{ id: 1, netease_id: '1', platform: 'netease', title: '歌', artist: '唱' }]
+
+      await store.play(0)
+
+      expect(store.audio.src).toContain('/api/music/stream?id=1&platform=netease')
+      expect(store.isPlaying).toBe(true)
+    })
+
+    it('播放失败后再点播放会重新拉直链', async () => {
+      vi.mocked(musicApi.url)
+        .mockResolvedValueOnce({ url: 'https://bad.example/x.mp3' })
+        .mockResolvedValueOnce({ url: '/api/music/stream?id=1&platform=netease' })
+      const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play')
+      playSpy.mockRejectedValueOnce(
+        Object.assign(new Error('no source'), { name: 'NotSupportedError' }),
+      )
+      playSpy.mockResolvedValueOnce()
+      const store = useMusicStore()
+      store.songs = [{ id: 1, netease_id: '1', platform: 'netease', title: '歌', artist: '唱' }]
+
+      await store.play(0)
+      expect(store.playError).toBe('音频加载失败（NotSupportedError）')
+
+      await store.togglePlay()
+      expect(musicApi.url).toHaveBeenCalledTimes(2)
+      expect(store.isPlaying).toBe(true)
+    })
+
     it('音源不被 Chrome 支持时提示加载失败', async () => {
       vi.mocked(musicApi.url).mockResolvedValue({
         url: 'https://m801.music.126.net/song.mp3',

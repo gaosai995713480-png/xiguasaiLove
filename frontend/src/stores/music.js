@@ -17,6 +17,7 @@ export const useMusicStore = defineStore('music', () => {
   // 使用 markRaw 避免 Vue 对 Audio 做响应式代理
   const audio = markRaw(new Audio())
   audio.preload = 'auto'
+  audio.referrerPolicy = 'no-referrer'
 
   function toHttpsMediaUrl(url) {
     return typeof url === 'string' && url.startsWith('http://')
@@ -221,6 +222,9 @@ export const useMusicStore = defineStore('music', () => {
         isPlaying.value = false
         playError.value = '播放请求失败'
       })
+    } else if (playError.value || !audio.src) {
+      // 上次直链已经坏了，重新向后端拉同源播放地址
+      return play(currentIndex.value)
     } else {
       // B2: await play() 并 catch，确保状态同步
       audio.play().then(() => {

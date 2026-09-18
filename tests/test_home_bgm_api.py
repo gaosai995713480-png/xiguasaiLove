@@ -220,4 +220,4 @@ def test_meting_bgm_returns_resolved_url(restore_bgm, monkeypatch):
 
     assert data["enabled"] is True
     assert data["source"] == "meting"
-    assert data["url"] == "https://cdn/456.mp3"
+    assert data["url"] == "/api/music/stream?id=456&platform=netease"

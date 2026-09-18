@@ -76,10 +76,10 @@ class Meting {
 
     // 添加超时控制
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
     requestOptions.signal = controller.signal;
 
-    let retries = 3;
+    let retries = 1;
     const makeRequest = async () => {
       try {
         const response = await fetch(url, requestOptions);

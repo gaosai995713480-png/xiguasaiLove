@@ -36,11 +36,17 @@ def call_meting(command: str, **kwargs) -> dict:
 
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=15,
+            cmd, capture_output=True, text=True, timeout=30,
             encoding="utf-8", env=env,
         )
         if result.returncode == 0 and result.stdout.strip():
             return json.loads(result.stdout)
+        logger.warning(
+            "call_meting empty command=%s rc=%s stderr=%s",
+            command,
+            getattr(result, "returncode", None),
+            (result.stderr or "")[:300],
+        )
     except Exception as e:
-        logger.warning("call_meting error: %s", e)
+        logger.warning("call_meting error command=%s: %s", command, e)
     return {}

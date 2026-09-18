@@ -22,7 +22,9 @@ export default class NeteaseProvider extends BaseProvider {
     const deviceId = this._generateDeviceId();
 
     return {
-      Referer: "music.163.com",
+      Referer: "https://music.163.com/",
+      "X-Real-IP": "118.88.88.88",
+      "X-Forwarded-For": "118.88.88.88",
       Cookie: `osver=android; appver=8.7.01; os=android; deviceId=${deviceId}; channel=netease; requestId=${timestamp}_${Math.floor(
         Math.random() * 1000
       )
@@ -131,12 +133,16 @@ export default class NeteaseProvider extends BaseProvider {
    * 获取音频播放链接
    */
   url(id, br = 320) {
+    const bitrate = Number(br) || 320;
+    const level = bitrate >= 320 ? "exhigh" : bitrate >= 192 ? "higher" : "standard";
     return {
       method: "POST",
-      url: "http://music.163.com/api/song/enhance/player/url",
+      // interface + v1：海外 VPS 走 music.163.com 旧接口时常拿不到直链
+      url: "https://interface.music.163.com/api/song/enhance/player/url/v1",
       body: {
-        ids: [id],
-        br: br * 1000,
+        ids: `[${id}]`,
+        level,
+        encodeType: "mp3",
       },
       encode: "netease_eapi",
       decode: "netease_url",
@@ -242,28 +248,21 @@ export default class NeteaseProvider extends BaseProvider {
    * 网易云音乐 URL 解码
    */
   urlDecode(result) {
-    const data = JSON.parse(result);
-    let url;
-
-    if (data.data[0].uf && data.data[0].uf.url) {
-      data.data[0].url = data.data[0].uf.url;
+    try {
+      const data = JSON.parse(result);
+      const song = Array.isArray(data?.data) ? data.data[0] : null;
+      const rawUrl = song?.uf?.url || song?.url || "";
+      if (rawUrl) {
+        return JSON.stringify({
+          url: rawUrl,
+          size: song.size || 0,
+          br: song.br ? song.br / 1000 : 0,
+        });
+      }
+    } catch {
+      // 网易云偶发返回 HTML/空包，避免 CLI 直接崩溃
     }
-
-    if (data.data[0].url) {
-      url = {
-        url: data.data[0].url,
-        size: data.data[0].size,
-        br: data.data[0].br / 1000,
-      };
-    } else {
-      url = {
-        url: "",
-        size: 0,
-        br: -1,
-      };
-    }
-
-    return JSON.stringify(url);
+    return JSON.stringify({ url: "", size: 0, br: -1 });
   }
 
   /**
