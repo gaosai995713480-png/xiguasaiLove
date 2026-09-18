@@ -180,6 +180,8 @@ export const wishApi = {
 
 export const dayApi = {
   get: (date) => get(`/api/day/${encodeURIComponent(date)}`),
+  memory: () => get('/api/memory'),
+  setMemory: (enabled) => put('/api/memory', { enabled }),
 }
 
 export const mapApi = {
@@ -245,6 +247,31 @@ export const configApi = {
   updateCookies: (data) => post('/api/config/cookies', data),
   listKeys: () => get('/api/config/keys'),
   saveKey: (data) => post('/api/config/keys', data),
+}
+
+export const backupApi = {
+  start: () => post('/api/backup/export', {}),
+  status: () => get('/api/backup/export'),
+  download: async () => {
+    const res = await request('/api/backup/export/download')
+    const blob = await res.blob()
+    const filename = filenameFromDisposition(res.headers.get('content-disposition'))
+    return { blob, filename }
+  },
+}
+
+function filenameFromDisposition(header) {
+  const value = header || ''
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(value)
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1])
+    } catch {
+      return encoded[1]
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(value)
+  return plain ? plain[1] : 'xiguasai-memory.zip'
 }
 
 export const jukeboxApi = {

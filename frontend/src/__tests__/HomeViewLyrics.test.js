@@ -33,6 +33,7 @@ const STUBS = {
   DanmuBar: { template: '<div />' },
   WeatherCard: { template: '<div />' },
   CapsuleSection: { template: '<div />' },
+  MemoryCard: { template: '<div />' },
   NavSidebar: { template: '<div />' },
   ThemeSwitcher: { template: '<div />' },
   LyricFxSwitcher: { template: '<div class="fx-stub" />' },

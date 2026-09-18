@@ -10,6 +10,7 @@ import LyricFxSwitcher from '../components/LyricFxSwitcher.vue'
 import WeatherCard from '../components/WeatherCard.vue'
 import DanmuBar from '../components/DanmuBar.vue'
 import CapsuleSection from '../components/CapsuleSection.vue'
+import MemoryCard from '../components/MemoryCard.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -71,6 +72,8 @@ async function logout() {
 
     <h1>心动告白</h1>
     <button class="signature signature-btn" type="button" :title="`查看 ${TOGETHER_START}`" @click="router.push(`/day/${TOGETHER_START}`)">在一起 {{ togetherDays }} 天 ❤️</button>
+
+    <MemoryCard />
 
     <div class="heart-container">
       <div class="heart">

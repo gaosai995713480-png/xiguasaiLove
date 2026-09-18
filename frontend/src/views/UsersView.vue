@@ -1,9 +1,11 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import TopBar from '../components/TopBar.vue'
-import { configApi, usersApi } from '../api'
+import { backupApi, configApi, usersApi } from '../api'
 import { useAuthStore } from '../stores/auth'
+
+const POLL_MS = 800
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -20,6 +22,11 @@ const newConfig = ref({
   key: '',
   value: '',
 })
+const backupJob = ref({ status: 'idle' })
+const backupBusy = ref(false)
+const backupHint = ref('')
+let backupPollTimer = 0
+let startedThisVisit = false
 
 async function loadUsers() {
   try {
@@ -81,6 +88,98 @@ async function saveConfigKey() {
   }
 }
 
+const backupPacking = computed(() => backupJob.value.status === 'packing')
+const backupReady = computed(() => backupJob.value.status === 'done')
+const backupFailed = computed(() => backupJob.value.status === 'failed')
+const backupPercent = computed(() => {
+  const progress = backupJob.value.progress || {}
+  if (!progress.total) return backupPacking.value ? 8 : 0
+  return Math.min(100, Math.round((progress.current / progress.total) * 100))
+})
+const backupStatusText = computed(() => {
+  if (backupPacking.value) {
+    return backupJob.value.progress?.message || '正在打包回忆'
+  }
+  if (backupReady.value) {
+    const failed = backupJob.value.stats?.files_failed || 0
+    if (failed) return `备份已生成，有 ${failed} 张照片没打进去`
+    return '备份已生成，可以下载'
+  }
+  if (backupFailed.value) return backupJob.value.error || '导出失败，请重试'
+  return '把时间轴、心情、许愿、胶囊、足迹、相册和做过的菜打成一份压缩包。不含密码和密钥。'
+})
+
+function applyBackupJob(job) {
+  backupJob.value = job && job.status ? job : { status: 'idle' }
+  if (backupJob.value.status === 'packing') {
+    startBackupPolling()
+  } else {
+    stopBackupPolling()
+  }
+}
+
+async function loadBackupStatus() {
+  try {
+    applyBackupJob(await backupApi.status())
+  } catch {
+    applyBackupJob({ status: 'idle' })
+  }
+}
+
+async function startBackup() {
+  if (backupBusy.value || backupPacking.value) return
+  backupBusy.value = true
+  backupHint.value = ''
+  startedThisVisit = true
+  try {
+    applyBackupJob(await backupApi.start())
+  } catch {
+    backupHint.value = '导出没有开始，请稍后重试'
+    startedThisVisit = false
+  } finally {
+    backupBusy.value = false
+  }
+  if (backupJob.value.status === 'done' && startedThisVisit) {
+    startedThisVisit = false
+    await downloadBackup()
+  }
+}
+
+async function downloadBackup() {
+  if (!backupReady.value || backupBusy.value) return
+  backupBusy.value = true
+  try {
+    const { blob, filename } = await backupApi.download()
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename || backupJob.value.filename || 'xiguasai-memory.zip'
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    backupHint.value = '下载失败，请重新导出'
+  } finally {
+    backupBusy.value = false
+  }
+}
+
+function startBackupPolling() {
+  if (backupPollTimer) return
+  backupPollTimer = window.setInterval(async () => {
+    try {
+      applyBackupJob(await backupApi.status())
+    } catch {
+      stopBackupPolling()
+    }
+  }, POLL_MS)
+}
+
+function stopBackupPolling() {
+  if (!backupPollTimer) return
+  window.clearInterval(backupPollTimer)
+  backupPollTimer = 0
+}
+
 onMounted(() => {
   if (!authStore.isAdmin) {
     router.replace('/')
@@ -89,6 +188,11 @@ onMounted(() => {
   loadUsers()
   loadInviteCode()
   loadConfigKeys()
+  loadBackupStatus()
+})
+
+onUnmounted(() => {
+  stopBackupPolling()
 })
 </script>
 
@@ -108,6 +212,43 @@ onMounted(() => {
         <button class="btn-small btn-primary" @click="saveInviteCode" :disabled="loading">保存</button>
         <button class="btn-small" @click="showCodeEdit = false">取消</button>
       </div>
+    </section>
+
+    <section class="backup-section glass-card" data-test="backup-export">
+      <h3>导出回忆</h3>
+      <p class="backup-copy" data-test="backup-status">{{ backupStatusText }}</p>
+      <p class="backup-note">压缩包里是全部相册原图，请自己妥善保存。文件在服务器上保留两小时。</p>
+      <div
+        class="backup-progress"
+        :class="{ visible: backupPacking || backupReady }"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="backup-progress-track">
+          <div class="backup-progress-bar" :style="{ width: `${backupPercent}%` }"></div>
+        </div>
+      </div>
+      <div class="backup-actions">
+        <button
+          class="btn-small btn-primary backup-btn"
+          data-test="backup-start"
+          :disabled="backupBusy || backupPacking"
+          :aria-busy="backupPacking ? 'true' : 'false'"
+          @click="startBackup"
+        >
+          {{ backupPacking ? '正在打包' : backupReady || backupFailed ? '重新导出' : '开始导出' }}
+        </button>
+        <button
+          v-if="backupReady"
+          class="btn-small backup-btn"
+          data-test="backup-download"
+          :disabled="backupBusy"
+          @click="downloadBackup"
+        >
+          下载备份
+        </button>
+      </div>
+      <p v-if="backupHint" class="config-error backup-hint">{{ backupHint }}</p>
     </section>
 
     <!-- 系统配置管理 -->
@@ -265,6 +406,77 @@ onMounted(() => {
 }
 
 .invite-section { margin-bottom: 0px; }
+
+.backup-section h3 {
+  margin-bottom: 12px;
+}
+
+.backup-copy {
+  margin: 0 0 8px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.backup-note {
+  margin: 0 0 16px;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.backup-progress {
+  height: 10px;
+  margin: 0 0 16px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.backup-progress.visible {
+  opacity: 1;
+}
+
+.backup-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.backup-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  transition: width 0.2s ease;
+}
+
+.backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.backup-btn {
+  min-height: var(--touch-min);
+  min-width: 120px;
+}
+
+.backup-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.backup-hint {
+  margin-top: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backup-progress,
+  .backup-progress-bar {
+    transition: none;
+  }
+}
 
 .config-section { margin-bottom: 0; }
 

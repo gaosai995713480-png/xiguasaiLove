@@ -32,7 +32,16 @@ class FakeCursor:
     def execute(self, sql, params=None):
         self.executed.append((sql, params))
         text = " ".join(str(sql).split()).lower()
-        if f"from `{settings.timeline_table}`".lower() in text:
+        if "distinct" in text and f"from `{settings.timeline_table}`".lower() in text:
+            self._fetchall = self.payload.get("timeline_dates", [])
+            self._fetchone = None
+        elif "distinct" in text and f"from `{settings.mood_table}`".lower() in text:
+            self._fetchall = self.payload.get("mood_dates", [])
+            self._fetchone = None
+        elif "distinct" in text and f"from `{settings.map_table}`".lower() in text:
+            self._fetchall = self.payload.get("marker_dates", [])
+            self._fetchone = None
+        elif f"from `{settings.timeline_table}`".lower() in text:
             self._fetchall = self.payload.get("timeline", [])
             self._fetchone = None
         elif f"from `{settings.mood_table}`".lower() in text:
@@ -46,7 +55,7 @@ class FakeCursor:
             self._fetchall = self.payload.get("markers", [])
             self._fetchone = None
         elif "from love_photos" in text:
-            self._fetchall = self.payload.get("photos", [])
+            self._fetchall = self.payload.get("photos" if "where" in text else "photo_dates", [])
             self._fetchone = None
         else:
             self._fetchall = []
@@ -174,5 +183,112 @@ def test_day_hides_photos_until_gallery_unlocked(monkeypatch):
     data = response.json()
     assert data["photos"] == []
     assert data["gallery_unlocked"] is False
+    sqls = [" ".join(str(sql).split()).lower() for sql, _ in conn.cursor_obj.executed]
+    assert all("love_photos" not in sql for sql in sqls)
+
+
+def test_random_memory_requires_authentication():
+    response = client.get("/api/memory")
+    assert response.status_code == 401
+
+
+def test_random_memory_enabled_by_default(monkeypatch):
+    login_as(gallery_unlocked=True)
+    payload = {
+        "timeline_dates": [(datetime.date(2023, 10, 26),)],
+        "mood_dates": [],
+        "marker_dates": [],
+        "photo_dates": [],
+        "timeline": [
+            (1, datetime.date(2023, 10, 26), "第一次见面", "很开心", "https://img/a.jpg", "💕"),
+        ],
+        "mood": [],
+        "markers": [],
+        "marker_photos": [],
+        "photos": [],
+    }
+    monkeypatch.setattr(day_router, "get_db", lambda: fake_get_db(payload))
+    monkeypatch.setattr(day_router, "get_oss_bucket", lambda: None)
+    monkeypatch.setattr(day_router, "get_config", lambda key: "")
+    monkeypatch.setattr(day_router, "_today", lambda: datetime.date(2026, 9, 18))
+
+    response = client.get("/api/memory")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["enabled"] is True
+    assert data["memory"]["date"] == "2023-10-26"
+    assert data["memory"]["story_title"] == "第一次见面"
+    assert data["memory"]["cover_url"] == "https://img/a.jpg"
+
+
+def test_random_memory_hidden_when_admin_turns_off(monkeypatch):
+    login_as("admin")
+    monkeypatch.setattr(day_router, "get_config", lambda key: "off")
+    queried = {"called": False}
+
+    def boom():
+        queried["called"] = True
+        return fake_get_db({})
+
+    monkeypatch.setattr(day_router, "get_db", boom)
+
+    response = client.get("/api/memory")
+
+    assert response.status_code == 200
+    assert response.json() == {"enabled": False, "memory": None}
+    assert queried["called"] is False
+
+
+def test_visitor_cannot_toggle_random_memory():
+    login_as("visitor")
+    response = client.put("/api/memory", json={"enabled": False})
+    assert response.status_code == 403
+
+
+def test_admin_can_toggle_random_memory(monkeypatch):
+    login_as("admin")
+    saved = {}
+
+    def fake_set(key, value):
+        saved[key] = value
+
+    monkeypatch.setattr(day_router, "set_config", fake_set)
+
+    response = client.put("/api/memory", json={"enabled": False})
+
+    assert response.status_code == 200
+    assert response.json() == {"enabled": False}
+    assert saved[day_router.MEMORY_CONFIG_KEY] == "off"
+
+
+def test_random_memory_skips_gallery_photos_until_unlocked(monkeypatch):
+    login_as(gallery_unlocked=False)
+    payload = {
+        "timeline_dates": [],
+        "mood_dates": [],
+        "marker_dates": [],
+        "photo_dates": [(datetime.date(2024, 1, 1),)],
+        "timeline": [],
+        "mood": [],
+        "markers": [],
+        "photos": [
+            (7, "secret.jpg", "/photos/secret.jpg", "", datetime.datetime(2024, 1, 1, 12, 0, 0)),
+        ],
+    }
+    conn = FakeConnection(payload)
+
+    @contextmanager
+    def tracking_get_db():
+        yield conn
+
+    monkeypatch.setattr(day_router, "get_db", tracking_get_db)
+    monkeypatch.setattr(day_router, "get_oss_bucket", lambda: None)
+    monkeypatch.setattr(day_router, "get_config", lambda key: "on")
+
+    response = client.get("/api/memory")
+
+    assert response.status_code == 200
+    assert response.json()["memory"] is None
     sqls = [" ".join(str(sql).split()).lower() for sql, _ in conn.cursor_obj.executed]
     assert all("love_photos" not in sql for sql in sqls)

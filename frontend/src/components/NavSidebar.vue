@@ -64,7 +64,7 @@ const moreItems = computed(() => {
     ...groups.find((g) => g.key === 'tools').items,
   ]
   if (authStore.isAdmin) {
-    items.push({ to: '/users', icon: '👥', label: '用户管理', desc: '账号与邀请码' })
+    items.push({ to: '/users', icon: '👥', label: '用户管理', desc: '账号、邀请码与回忆备份' })
   }
   return items
 })

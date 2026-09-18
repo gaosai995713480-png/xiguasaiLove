@@ -9,7 +9,7 @@ const mockFetch = vi.fn()
 vi.stubGlobal('fetch', mockFetch)
 
 // 动态导入以确保 mock 生效
-let danmuApi, authApi, dayApi
+let danmuApi, authApi, dayApi, backupApi
 
 beforeEach(async () => {
   vi.resetModules()
@@ -18,6 +18,7 @@ beforeEach(async () => {
   danmuApi = api.danmuApi
   authApi = api.authApi
   dayApi = api.dayApi
+  backupApi = api.backupApi
 })
 
 describe('danmuApi', () => {
@@ -130,5 +131,71 @@ describe('dayApi', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1)
     expect(mockFetch.mock.calls[0][0]).toBe('/api/day/2023-10-26')
     expect(result.date).toBe('2023-10-26')
+  })
+
+  it('请求首页随机回忆', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ enabled: true, memory: { date: '2023-10-26' } }),
+    })
+
+    const result = await dayApi.memory()
+
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/memory')
+    expect(result.enabled).toBe(true)
+    expect(result.memory.date).toBe('2023-10-26')
+  })
+
+  it('管理员开关随机回忆', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ enabled: false }),
+    })
+
+    const result = await dayApi.setMemory(false)
+
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/memory')
+    expect(mockFetch.mock.calls[0][1].method).toBe('PUT')
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({ enabled: false })
+    expect(result.enabled).toBe(false)
+  })
+})
+
+describe('backupApi', () => {
+  it('管理员开始导出备份', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ status: 'packing', id: 'job-1' }),
+    })
+
+    const result = await backupApi.start()
+
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/backup/export')
+    expect(mockFetch.mock.calls[0][1].method).toBe('POST')
+    expect(result.status).toBe('packing')
+  })
+
+  it('下载备份时解析文件名', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: {
+        get: (name) => (
+          String(name).toLowerCase() === 'content-disposition'
+            ? "attachment; filename=\"xiguasai-memory.zip\"; filename*=UTF-8''xiguasai-memory-2026-09-18.zip"
+            : null
+        ),
+      },
+      blob: () => Promise.resolve(new Blob(['zip-bytes'])),
+    })
+
+    const result = await backupApi.download()
+
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/backup/export/download')
+    expect(result.filename).toBe('xiguasai-memory-2026-09-18.zip')
+    expect(result.blob).toBeInstanceOf(Blob)
   })
 })

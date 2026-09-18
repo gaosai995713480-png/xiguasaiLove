@@ -8,6 +8,10 @@ const mockSaveKey = vi.fn()
 const mockPush = vi.fn()
 const mockReplace = vi.fn()
 
+const mockBackupStatus = vi.fn()
+const mockBackupStart = vi.fn()
+const mockBackupDownload = vi.fn()
+
 vi.mock('../api/index.js', () => ({
   usersApi: {
     list: (...args) => mockListUsers(...args),
@@ -18,6 +22,11 @@ vi.mock('../api/index.js', () => ({
   configApi: {
     listKeys: (...args) => mockListKeys(...args),
     saveKey: (...args) => mockSaveKey(...args),
+  },
+  backupApi: {
+    status: (...args) => mockBackupStatus(...args),
+    start: (...args) => mockBackupStart(...args),
+    download: (...args) => mockBackupDownload(...args),
   },
 }))
 
@@ -58,6 +67,9 @@ describe('UsersView 配置管理', () => {
       ],
     })
     mockSaveKey.mockResolvedValue({ ok: true, key: 'TRIPSTAR_XHS_COOKIE' })
+    mockBackupStatus.mockResolvedValue({ status: 'idle' })
+    mockBackupStart.mockResolvedValue({ status: 'packing', progress: { current: 0, total: 1, message: '正在打包' } })
+    mockBackupDownload.mockResolvedValue({ blob: new Blob(['zip']), filename: 'xiguasai-memory.zip' })
   })
 
   it('管理员可以在用户管理页新增 love_config key', async () => {
