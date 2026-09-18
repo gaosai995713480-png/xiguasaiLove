@@ -118,4 +118,9 @@ def update_cookies(body: dict, _=Depends(require_role("admin"))):
             value = str(body[key]).strip()
             set_config(key, value)
             updated += 1
+    try:
+        from .music import _url_cache
+        _url_cache.clear()
+    except Exception:
+        pass
     return {"ok": True, "updated": updated}

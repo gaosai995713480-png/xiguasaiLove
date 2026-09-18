@@ -25,13 +25,13 @@ export default class NeteaseProvider extends BaseProvider {
       Referer: "https://music.163.com/",
       "X-Real-IP": "118.88.88.88",
       "X-Forwarded-For": "118.88.88.88",
-      Cookie: `osver=android; appver=8.7.01; os=android; deviceId=${deviceId}; channel=netease; requestId=${timestamp}_${Math.floor(
+      Cookie: `os=pc; osver=Microsoft-Windows-10-Professional-build-22631-64bit; appver=8.9.70; deviceId=${deviceId}; channel=netease; requestId=${timestamp}_${Math.floor(
         Math.random() * 1000
       )
         .toString()
         .padStart(4, "0")}; __remember_me=true`,
       "User-Agent":
-        "Mozilla/5.0 (Linux; Android 11; M2007J3SC Build/RKQ1.200826.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/77.0.3865.120 MQQBrowser/6.2 TBS/045714 Mobile Safari/537.36 NeteaseMusic/8.7.01",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
       Accept: "*/*",
       "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
       Connection: "keep-alive",

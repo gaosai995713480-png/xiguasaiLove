@@ -10,6 +10,19 @@
 import { URLSearchParams } from "url";
 import ProviderFactory from "./providers/index.js";
 
+function mergeCookieHeader(baseCookie, extraCookie) {
+  const merged = new Map();
+  for (const raw of `${baseCookie || ""};${extraCookie || ""}`.split(";")) {
+    const part = raw.trim();
+    if (!part || !part.includes("=")) continue;
+    const idx = part.indexOf("=");
+    const key = part.slice(0, idx).trim();
+    const value = part.slice(idx + 1).trim();
+    if (key) merged.set(key, value);
+  }
+  return [...merged.entries()].map(([key, value]) => `${key}=${value}`).join("; ");
+}
+
 class Meting {
   constructor(server = "netease") {
     this.VERSION = "__VERSION__"; // 在构建时由 rollup 替换为实际版本号
@@ -40,9 +53,10 @@ class Meting {
     return this;
   }
 
-  // 设置 Cookie
+  // 设置 Cookie：与平台默认 Cookie 合并，而不是整段覆盖。
+  // 只贴 MUSIC_U 时如果丢掉 os/appver，网易云会当成未登录，只给试听。
   cookie(cookie) {
-    this.header["Cookie"] = cookie;
+    this.header["Cookie"] = mergeCookieHeader(this.header["Cookie"], cookie);
     return this;
   }
 
