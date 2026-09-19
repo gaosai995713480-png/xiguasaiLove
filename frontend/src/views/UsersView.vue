@@ -25,8 +25,8 @@ const newConfig = ref({
 const backupJob = ref({ status: 'idle' })
 const backupBusy = ref(false)
 const backupHint = ref('')
+const backupDownloadHref = '/api/backup/export/download'
 let backupPollTimer = 0
-let startedThisVisit = false
 
 async function loadUsers() {
   try {
@@ -102,8 +102,8 @@ const backupStatusText = computed(() => {
   }
   if (backupReady.value) {
     const failed = backupJob.value.stats?.files_failed || 0
-    if (failed) return `备份已生成，有 ${failed} 张照片没打进去`
-    return '备份已生成，可以下载'
+    if (failed) return `备份已生成，有 ${failed} 张照片没打进去。请点下载备份`
+    return '备份已生成，请点下载备份'
   }
   if (backupFailed.value) return backupJob.value.error || '导出失败，请重试'
   return '把时间轴、心情、许愿、胶囊、足迹、相册和做过的菜打成一份压缩包。不含密码和密钥。'
@@ -130,34 +130,10 @@ async function startBackup() {
   if (backupBusy.value || backupPacking.value) return
   backupBusy.value = true
   backupHint.value = ''
-  startedThisVisit = true
   try {
     applyBackupJob(await backupApi.start())
   } catch {
     backupHint.value = '导出没有开始，请稍后重试'
-    startedThisVisit = false
-  } finally {
-    backupBusy.value = false
-  }
-  if (backupJob.value.status === 'done' && startedThisVisit) {
-    startedThisVisit = false
-    await downloadBackup()
-  }
-}
-
-async function downloadBackup() {
-  if (!backupReady.value || backupBusy.value) return
-  backupBusy.value = true
-  try {
-    const { blob, filename } = await backupApi.download()
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = filename || backupJob.value.filename || 'xiguasai-memory.zip'
-    link.click()
-    URL.revokeObjectURL(url)
-  } catch {
-    backupHint.value = '下载失败，请重新导出'
   } finally {
     backupBusy.value = false
   }
@@ -238,15 +214,15 @@ onUnmounted(() => {
         >
           {{ backupPacking ? '正在打包' : backupReady || backupFailed ? '重新导出' : '开始导出' }}
         </button>
-        <button
+        <a
           v-if="backupReady"
           class="btn-small backup-btn"
           data-test="backup-download"
-          :disabled="backupBusy"
-          @click="downloadBackup"
+          :href="backupDownloadHref"
+          :download="backupJob.filename || 'xiguasai-memory.zip'"
         >
           下载备份
-        </button>
+        </a>
       </div>
       <p v-if="backupHint" class="config-error backup-hint">{{ backupHint }}</p>
     </section>
@@ -459,6 +435,14 @@ onUnmounted(() => {
 .backup-btn {
   min-height: var(--touch-min);
   min-width: 120px;
+}
+
+a.backup-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  box-sizing: border-box;
 }
 
 .backup-btn:disabled {

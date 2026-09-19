@@ -61,8 +61,6 @@ async function mountView() {
 describe('UsersView 导出回忆', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:backup')
-    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
     mockListUsers.mockResolvedValue([])
     mockGetInviteCode.mockResolvedValue({ code: 'love2023' })
     mockListKeys.mockResolvedValue({ items: [] })
@@ -124,13 +122,10 @@ describe('UsersView 导出回忆', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="backup-status"]').text()).toContain('备份已生成')
-    expect(wrapper.get('[data-test="backup-download"]').exists()).toBe(true)
-
-    await wrapper.get('[data-test="backup-download"]').trigger('click')
-    await flushPromises()
-
-    expect(mockBackupDownload).toHaveBeenCalled()
-    expect(URL.createObjectURL).toHaveBeenCalled()
+    const download = wrapper.get('[data-test="backup-download"]')
+    expect(download.element.tagName).toBe('A')
+    expect(download.attributes('href')).toBe('/api/backup/export/download')
+    expect(download.attributes('download')).toBe('xiguasai-memory-2026-09-18.zip')
     wrapper.unmount()
   })
 })
