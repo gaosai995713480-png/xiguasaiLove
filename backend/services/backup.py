@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
-import tempfile
 import threading
 import uuid
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -25,6 +24,11 @@ EXPORT_VERSION = 1
 EXPORT_TTL = timedelta(hours=2)
 PACK_TIMEOUT = timedelta(minutes=30)
 FOLDER_PREFIX = "xiguasai-memory"
+MEDIA_FETCH_WORKERS = 8
+_STORE_SUFFIXES = {
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif",
+    ".bmp", ".tif", ".tiff", ".mp4", ".mov", ".m4v", ".mp3", ".aac", ".m4a",
+}
 
 _SECRET_TABLE_HINTS = (
     "love_config",
@@ -77,7 +81,16 @@ class ExportJob:
                 "message": self.progress.message,
             },
             "stats": self.stats,
+            "file_size": self.file_size(),
         }
+
+    def file_size(self) -> int:
+        if self.status != "done" or not self.zip_path:
+            return 0
+        try:
+            return self.zip_path.stat().st_size if self.zip_path.is_file() else 0
+        except OSError:
+            return 0
 
 
 def reset_jobs() -> None:
@@ -123,7 +136,7 @@ def run_export_job(job_id: str) -> None:
     job = _job_if_current(job_id)
     if not job:
         return
-    work_dir = None
+    zip_path = None
     try:
         _update_progress(job_id, message="正在收集回忆")
         memories = collect_memories()
@@ -131,31 +144,9 @@ def run_export_job(job_id: str) -> None:
         _update_progress(job_id, current=0, total=len(media_items), message="正在打包文件")
 
         export_dir = get_export_dir()
-        work_dir = Path(tempfile.mkdtemp(prefix="memory-", dir=str(export_dir)))
         folder_name = Path(job.filename).stem
-        archive_root = work_dir / folder_name
-        archive_root.mkdir(parents=True, exist_ok=True)
-
-        failed = _write_media_files(job_id, archive_root, media_items)
-        memories["media"] = {
-            "downloaded": len(media_items) - len(failed),
-            "failed": failed,
-        }
-        (archive_root / "memories.json").write_text(
-            json.dumps(memories, ensure_ascii=False, indent=2, default=_json_default),
-            encoding="utf-8",
-        )
-        (archive_root / "memories.md").write_text(
-            render_markdown(memories),
-            encoding="utf-8",
-        )
-        (archive_root / "README.txt").write_text(
-            render_readme(memories),
-            encoding="utf-8",
-        )
-
         zip_path = export_dir / f"{job_id}.zip"
-        _write_zip(archive_root, folder_name, zip_path)
+        failed = _write_archive(job_id, zip_path, folder_name, memories, media_items)
         stats = {
             "timeline": len(memories.get("timeline") or []),
             "moods": len(memories.get("moods") or []),
@@ -171,10 +162,9 @@ def run_export_job(job_id: str) -> None:
         _finish_job(job_id, zip_path=zip_path, stats=stats)
     except Exception:
         logger.exception("回忆导出失败")
+        if zip_path and zip_path.exists():
+            zip_path.unlink(missing_ok=True)
         _fail_job(job_id, "打包失败，请稍后重试")
-    finally:
-        if work_dir and work_dir.exists():
-            shutil.rmtree(work_dir, ignore_errors=True)
 
 
 def collect_memories() -> dict:
@@ -549,59 +539,102 @@ def render_readme(memories: dict) -> str:
     )
 
 
-def _write_media_files(job_id: str, archive_root: Path, items: list[dict]) -> list[dict]:
+def compress_for(name: str) -> int:
+    """图片和音视频已经压过，再 DEFLATE 只会浪费 CPU，体积几乎不变。"""
+    suffix = Path(name).suffix.lower()
+    return zipfile.ZIP_STORED if suffix in _STORE_SUFFIXES else zipfile.ZIP_DEFLATED
+
+
+def _write_archive(job_id: str, zip_path: Path, folder_name: str, memories: dict, items: list[dict]) -> list[dict]:
+    if zip_path.exists():
+        zip_path.unlink()
     bucket = get_oss_bucket()
     failed: list[dict] = []
     total = len(items)
-    for index, item in enumerate(items, start=1):
+    write_lock = threading.Lock()
+    done = 0
+
+    def mark_progress() -> None:
+        nonlocal done
+        with write_lock:
+            done += 1
+            current = done
         _update_progress(
             job_id,
-            current=index - 1,
+            current=current,
             total=total,
-            message=f"正在打包照片 {index}/{total}" if total else "正在打包文件",
+            message=f"正在打包照片 {current}/{total}" if total else "正在打包文件",
         )
-        data = _read_media_bytes(item, bucket)
-        archive_path = item["archive_path"]
-        if not data:
-            failed.append({"path": archive_path, "reason": "文件不存在或读取失败"})
-            continue
-        target = archive_root / archive_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
-    _update_progress(job_id, current=total, total=total, message="正在生成压缩包")
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+        if items:
+            workers = max(1, min(MEDIA_FETCH_WORKERS, len(items)))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [pool.submit(_prepare_media, item, bucket) for item in items]
+                for future in as_completed(futures):
+                    item, payload = future.result()
+                    archive_path = item["archive_path"]
+                    if payload is None:
+                        failed.append({"path": archive_path, "reason": "文件不存在或读取失败"})
+                    else:
+                        arcname = f"{folder_name}/{archive_path}"
+                        with write_lock:
+                            _add_zip_member(archive, arcname, payload)
+                    mark_progress()
+
+        memories["media"] = {
+            "downloaded": len(items) - len(failed),
+            "failed": failed,
+        }
+        _update_progress(job_id, current=total, total=total, message="正在写入目录")
+        _add_zip_member(
+            archive,
+            f"{folder_name}/memories.json",
+            json.dumps(memories, ensure_ascii=False, indent=2, default=_json_default).encode("utf-8"),
+        )
+        _add_zip_member(archive, f"{folder_name}/memories.md", render_markdown(memories).encode("utf-8"))
+        _add_zip_member(archive, f"{folder_name}/README.txt", render_readme(memories).encode("utf-8"))
     return failed
 
 
-def _read_media_bytes(item: dict, bucket) -> bytes | None:
-    oss_key = item.get("oss_key")
-    if bucket and oss_key:
-        try:
-            obj = bucket.get_object(oss_key)
-            data = obj.read() if obj is not None else None
-            if data:
-                return data
-        except Exception:
-            logger.warning("OSS 读取失败: %s", oss_key, exc_info=True)
+def _add_zip_member(archive: zipfile.ZipFile, arcname: str, payload: bytes | Path) -> None:
+    compress = compress_for(arcname)
+    if isinstance(payload, Path):
+        archive.write(payload, arcname=arcname, compress_type=compress)
+        return
+    info = zipfile.ZipInfo(filename=arcname)
+    info.compress_type = compress
+    archive.writestr(info, payload)
+
+
+def _prepare_media(item: dict, bucket) -> tuple[dict, bytes | Path | None]:
+    local = _local_media_path(item)
+    if local is not None:
+        return item, local
+    return item, _read_oss_bytes(item, bucket)
+
+
+def _local_media_path(item: dict) -> Path | None:
     local_path = item.get("local_path")
-    if local_path:
-        path = Path(local_path)
-        if path.is_file():
-            try:
-                return path.read_bytes()
-            except Exception:
-                logger.warning("本地照片读取失败: %s", path, exc_info=True)
+    if not local_path:
+        return None
+    path = Path(local_path)
+    if path.is_file():
+        return path
     return None
 
 
-def _write_zip(archive_root: Path, folder_name: str, zip_path: Path) -> None:
-    if zip_path.exists():
-        zip_path.unlink()
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(archive_root.rglob("*")):
-            if not path.is_file():
-                continue
-            relative = path.relative_to(archive_root).as_posix()
-            archive.write(path, arcname=f"{folder_name}/{relative}")
+def _read_oss_bytes(item: dict, bucket) -> bytes | None:
+    oss_key = item.get("oss_key")
+    if not bucket or not oss_key:
+        return None
+    try:
+        obj = bucket.get_object(oss_key)
+        data = obj.read() if obj is not None else None
+        return data or None
+    except Exception:
+        logger.warning("OSS 读取失败: %s", oss_key, exc_info=True)
+        return None
 
 
 def _fetch(cursor, sql: str, fields: list[str], optional: bool = False) -> list[dict]:

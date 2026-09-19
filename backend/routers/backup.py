@@ -38,7 +38,10 @@ def download_export(_=Depends(require_role("admin"))):
         "Content-Disposition": (
             f'attachment; filename="{ascii_name}"; '
             f"filename*=UTF-8''{quote(job.filename)}"
-        )
+        ),
+        "X-Accel-Buffering": "no",
+        "Cache-Control": "private, no-store",
+        "Accept-Ranges": "bytes",
     }
     return FileResponse(
         job.zip_path,

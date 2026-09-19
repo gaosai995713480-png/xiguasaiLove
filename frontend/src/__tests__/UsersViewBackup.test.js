@@ -110,6 +110,7 @@ describe('UsersView 导出回忆', () => {
       .mockResolvedValue({
         status: 'done',
         filename: 'xiguasai-memory-2026-09-18.zip',
+        file_size: 1572864,
         stats: { files_failed: 0 },
       })
 
@@ -122,6 +123,7 @@ describe('UsersView 导出回忆', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="backup-status"]').text()).toContain('备份已生成')
+    expect(wrapper.get('[data-test="backup-status"]').text()).toContain('1.5 MB')
     const download = wrapper.get('[data-test="backup-download"]')
     expect(download.element.tagName).toBe('A')
     expect(download.attributes('href')).toBe('/api/backup/export/download')

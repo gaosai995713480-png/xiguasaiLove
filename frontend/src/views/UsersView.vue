@@ -102,12 +102,22 @@ const backupStatusText = computed(() => {
   }
   if (backupReady.value) {
     const failed = backupJob.value.stats?.files_failed || 0
-    if (failed) return `备份已生成，有 ${failed} 张照片没打进去。请点下载备份`
-    return '备份已生成，请点下载备份'
+    const size = formatBackupSize(backupJob.value.file_size)
+    const sizeText = size ? `，约 ${size}` : ''
+    if (failed) return `备份已生成${sizeText}，有 ${failed} 张照片没打进去。请点下载备份`
+    return `备份已生成${sizeText}，请点下载备份`
   }
   if (backupFailed.value) return backupJob.value.error || '导出失败，请重试'
   return '把时间轴、心情、许愿、胶囊、足迹、相册和做过的菜打成一份压缩包。不含密码和密钥。'
 })
+
+function formatBackupSize(bytes) {
+  const size = Number(bytes)
+  if (!Number.isFinite(size) || size <= 0) return ''
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1).replace(/\.0$/, '')} MB`
+  return `${(size / (1024 * 1024 * 1024)).toFixed(1).replace(/\.0$/, '')} GB`
+}
 
 function applyBackupJob(job) {
   backupJob.value = job && job.status ? job : { status: 'idle' }
@@ -193,7 +203,7 @@ onUnmounted(() => {
     <section class="backup-section glass-card" data-test="backup-export">
       <h3>导出回忆</h3>
       <p class="backup-copy" data-test="backup-status">{{ backupStatusText }}</p>
-      <p class="backup-note">压缩包里是全部相册原图，请自己妥善保存。文件在服务器上保留两小时。</p>
+      <p class="backup-note">压缩包里是全部相册原图，体积会比较大。文件在服务器上保留两小时。</p>
       <div
         class="backup-progress"
         :class="{ visible: backupPacking || backupReady }"

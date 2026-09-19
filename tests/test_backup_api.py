@@ -173,6 +173,36 @@ def sample_payload(photo_name="day-one.jpg"):
     }
 
 
+def test_compress_for_skips_already_compressed_media():
+    assert backup_service.compress_for("photos/a.jpg") == zipfile.ZIP_STORED
+    assert backup_service.compress_for("map/b.WEBP") == zipfile.ZIP_STORED
+    assert backup_service.compress_for("memories.json") == zipfile.ZIP_DEFLATED
+    assert backup_service.compress_for("README.txt") == zipfile.ZIP_DEFLATED
+
+
+def test_admin_export_prefers_local_photo_over_oss(monkeypatch):
+    isolate_paths(monkeypatch)
+    photo_name = "day-one.jpg"
+    settings.photos_dir.mkdir(parents=True, exist_ok=True)
+    (settings.photos_dir / photo_name).write_bytes(b"local-bytes")
+    monkeypatch.setattr(backup_service, "get_db", lambda: fake_get_db(sample_payload(photo_name)))
+    monkeypatch.setattr(
+        backup_service,
+        "get_oss_bucket",
+        lambda: FakeBucket({
+            f"photos/{photo_name}": b"oss-bytes",
+            "map/west-lake.jpg": b"map-bytes",
+        }),
+    )
+
+    admin = login_as("admin")
+    admin.post("/api/backup/export")
+    wait_status(admin, "done")
+    archive = zipfile.ZipFile(io.BytesIO(admin.get("/api/backup/export/download").content))
+    photo_name_in_zip = next(name for name in archive.namelist() if name.endswith(photo_name))
+    assert archive.read(photo_name_in_zip) == b"local-bytes"
+
+
 def test_oss_object_key_from_url():
     assert backup_service.oss_object_key("https://bucket.oss-cn-hangzhou.aliyuncs.com/photos/a.jpg") == "photos/a.jpg"
     assert backup_service.oss_object_key("https://cdn.example/map/west-lake.jpg?x=1") == "map/west-lake.jpg"
@@ -238,9 +268,15 @@ def test_admin_export_zip_contains_memories_and_photos(monkeypatch):
     assert not any("cookie" in key.lower() or "password" in key.lower() or "secret" in key.lower() for key in keys)
     assert "在一起" in markdown
     assert "西湖" in markdown
-    assert any(name.endswith(f"photos/{photo_name}") for name in names)
-    assert any(name.endswith("map/west-lake.jpg") for name in names)
-    assert archive.read(next(name for name in names if name.endswith(photo_name))) == b"jpeg-bytes"
+    photo_info = archive.getinfo(next(name for name in names if name.endswith(f"photos/{photo_name}")))
+    map_info = archive.getinfo(next(name for name in names if name.endswith("map/west-lake.jpg")))
+    json_info = archive.getinfo(json_name)
+    assert photo_info.compress_type == zipfile.ZIP_STORED
+    assert map_info.compress_type == zipfile.ZIP_STORED
+    assert json_info.compress_type == zipfile.ZIP_DEFLATED
+    assert archive.read(photo_info) == b"jpeg-bytes"
+    assert job["file_size"] > 0
+    assert download.headers.get("x-accel-buffering") == "no"
 
     joined = " ".join(sqls).lower()
     assert "love_config" not in joined
