@@ -10,6 +10,7 @@ const LEAF_EMOJIS = ['🍃', '🌿', '🍀']
 let timer = null
 
 function spawnLeaf() {
+  if (document.hidden) return
   const id = Date.now() + Math.random()
   leaves.value.push({
     id,

@@ -6,6 +6,7 @@ const stars = ref([])
 let meteorTimer = null
 
 function spawnMeteor() {
+  if (document.hidden) return
   const id = Date.now() + Math.random()
   // 错落有致的属性
   const isLarge = Math.random() > 0.8

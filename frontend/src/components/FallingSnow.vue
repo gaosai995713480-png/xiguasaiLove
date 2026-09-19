@@ -2,9 +2,12 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 
 const flakes = ref([])
+const MAX_FLAKES = 30
 let timer = null
 
 function spawnFlake() {
+  // 后台标签页不生成新粒子，避免切回来时瞬间堆积；数量封顶防止低端机掉帧
+  if (document.hidden || flakes.value.length >= MAX_FLAKES) return
   const id = Date.now() + Math.random()
   flakes.value.push({
     id,
@@ -64,7 +67,8 @@ onUnmounted(() => {
   top: -20px;
   background: white;
   border-radius: 50%;
-  filter: blur(1px);
+  /* 用静态阴影代替 filter: blur，阴影只栅格化一次，filter 会在每帧合成时重算 */
+  box-shadow: 0 0 3px 1px rgba(255, 255, 255, 0.55);
   animation: snow-fall linear forwards;
   will-change: transform;
 }

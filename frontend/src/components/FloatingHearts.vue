@@ -7,10 +7,13 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible'])
 const container = ref(null)
+const MAX_HEARTS = 12
 let timer = null
 
 function spawnHeart() {
   if (!container.value) return
+  // 后台标签页不生成新粒子，避免切回来时瞬间堆积；数量封顶防止低端机掉帧
+  if (document.hidden || container.value.childElementCount >= MAX_HEARTS) return
   const heart = document.createElement('span')
   const size = Math.random() * 14 + 10
   heart.className = 'floating-heart'
@@ -52,8 +55,9 @@ onUnmounted(() => {
   height: var(--size);
   background: linear-gradient(135deg, rgba(255, 107, 157, 0.6), rgba(196, 69, 105, 0.4));
   transform: rotate(-45deg);
-  filter: blur(1px) drop-shadow(0 0 12px rgba(255, 107, 157, 0.5));
+  filter: drop-shadow(0 0 12px rgba(255, 107, 157, 0.5));
   animation: float-up var(--float-duration) ease-in forwards;
+  will-change: transform, opacity;
   border-radius: 4px;
 }
 

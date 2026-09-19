@@ -2,9 +2,12 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 
 const fireflies = ref([])
+const MAX_FIREFLIES = 20
 let timer = null
 
 function spawnFirefly() {
+  // 后台标签页不生成新粒子，避免切回来时瞬间堆积；数量封顶防止低端机掉帧
+  if (document.hidden || fireflies.value.length >= MAX_FIREFLIES) return
   const id = Date.now() + Math.random()
   fireflies.value.push({
     id,

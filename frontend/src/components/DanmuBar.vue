@@ -299,7 +299,9 @@ onUnmounted(() => {
 :deep(.danmu-item) {
   position: fixed; left: calc(100vw + 20px); top: 0;
   padding: 10px 18px; border-radius: 16px;
-  background: var(--glass-bg); backdrop-filter: blur(20px);
+  /* 横穿屏幕的元素不能用 backdrop-filter：每帧都要重新模糊身后区域，改为半透明实色底 */
+  background: rgba(0, 0, 0, 0.28);
+  will-change: transform, opacity;
   border: 1px solid var(--glass-border); color: var(--text-primary);
   font-size: 15px; white-space: nowrap;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);

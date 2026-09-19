@@ -223,7 +223,7 @@ h1 {
 
 @keyframes title-glow {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.85; filter: brightness(1.2); }
+  50% { opacity: 0.85; }
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -262,19 +262,13 @@ h1 {
   animation: lyric-float-card 6s ease-in-out infinite;
 }
 .fx-float .lyrics {
-  animation: lyric-float-shadow 6s ease-in-out infinite;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.3);
 }
 
 @keyframes lyric-float-card {
   0%, 100% { transform: translateY(0) rotate(0deg); }
   33% { transform: translateY(-11px) rotate(-0.7deg); }
   66% { transform: translateY(7px) rotate(0.55deg); }
-}
-
-@keyframes lyric-float-shadow {
-  0%, 100% { box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28); }
-  33% { box-shadow: 0 22px 40px rgba(0, 0, 0, 0.36); }
-  66% { box-shadow: 0 7px 20px rgba(0, 0, 0, 0.24); }
 }
 
 /* 逐字波浪：卡片不动，每个字错峰起伏 */

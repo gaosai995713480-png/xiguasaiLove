@@ -2,9 +2,12 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 
 const petals = ref([])
+const MAX_PETALS = 18
 let timer = null
 
 function spawnPetal() {
+  // 后台标签页不生成新粒子，避免切回来时瞬间堆积；数量封顶防止低端机掉帧
+  if (document.hidden || petals.value.length >= MAX_PETALS) return
   const id = Date.now() + Math.random()
   petals.value.push({
     id,
