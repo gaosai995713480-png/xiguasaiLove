@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 
 const mockList = vi.fn()
@@ -39,6 +40,7 @@ describe('DanmuBar', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
+    localStorage.clear()
     setIntervalSpy = vi.spyOn(globalThis, 'setInterval')
     clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval')
     mockList.mockResolvedValue([
@@ -82,6 +84,43 @@ describe('DanmuBar', () => {
     await vi.advanceTimersByTimeAsync(RESUME_WARMUP_MS)
     expect(setIntervalSpy).toHaveBeenCalledTimes(3)
     expect(setIntervalSpy.mock.calls[2][1]).toBe(BASE_INTERVAL_MS)
+
+    wrapper.unmount()
+  })
+
+  it('点击收起按钮会藏起发送框，再点入口可以放出来', async () => {
+    const { default: DanmuBar } = await import('../components/DanmuBar.vue')
+    const wrapper = mount(DanmuBar, { attachTo: document.body })
+    await flushPromises()
+
+    expect(wrapper.get('.danmu-bar').classes()).not.toContain('is-collapsed')
+    expect(wrapper.find('[aria-label="展开发送框"]').exists()).toBe(false)
+
+    await wrapper.get('[aria-label="收起发送框"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('.danmu-bar').classes()).toContain('is-collapsed')
+    expect(wrapper.get('[aria-label="展开发送框"]').exists()).toBe(true)
+    expect(localStorage.getItem('danmu_bar_collapsed')).toBe('1')
+
+    await wrapper.get('[aria-label="展开发送框"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('.danmu-bar').classes()).not.toContain('is-collapsed')
+    expect(wrapper.find('[aria-label="展开发送框"]').exists()).toBe(false)
+    expect(localStorage.getItem('danmu_bar_collapsed')).toBe('0')
+
+    wrapper.unmount()
+  })
+
+  it('记住收起状态，下次打开仍是折叠的', async () => {
+    localStorage.setItem('danmu_bar_collapsed', '1')
+    const { default: DanmuBar } = await import('../components/DanmuBar.vue')
+    const wrapper = mount(DanmuBar, { attachTo: document.body })
+    await flushPromises()
+
+    expect(wrapper.get('.danmu-bar').classes()).toContain('is-collapsed')
+    expect(wrapper.get('[aria-label="展开发送框"]').exists()).toBe(true)
 
     wrapper.unmount()
   })

@@ -19,9 +19,33 @@ const danmuSpeed = ref(12)
 const danmuDensity = ref(8)
 const RESUME_WARMUP_MS = 4000
 const RESUME_WARMUP_FACTOR = 1.8
+const BAR_COLLAPSE_KEY = 'danmu_bar_collapsed'
 let danmuMainTimer = null
 let resumeWarmupTimer = null
 let danmuIndex = 0
+
+function readBarCollapsed() {
+  try { return localStorage.getItem(BAR_COLLAPSE_KEY) === '1' } catch { return false }
+}
+
+const barCollapsed = ref(readBarCollapsed())
+
+function persistBarCollapsed() {
+  try { localStorage.setItem(BAR_COLLAPSE_KEY, barCollapsed.value ? '1' : '0') } catch { /* ignore */ }
+}
+
+function setBarCollapsed(collapsed) {
+  barCollapsed.value = collapsed
+  if (collapsed) {
+    settingsOpen.value = false
+    danmuPanelOpen.value = false
+  }
+  persistBarCollapsed()
+}
+
+function toggleBarCollapsed() {
+  setBarCollapsed(!barCollapsed.value)
+}
 
 async function loadDanmu() {
   try { danmuList.value = await danmuApi.list(50) } catch { /* API layer handles toast */ }
@@ -181,7 +205,7 @@ onUnmounted(() => {
   <div id="danmu-layer" class="danmu-layer"></div>
 
   <!-- 弹幕列表面板 -->
-  <div class="danmu-panel" :class="{ 'is-open': danmuPanelOpen }">
+  <div class="danmu-panel" :class="{ 'is-open': danmuPanelOpen && !barCollapsed }">
     <div class="danmu-panel-header">
       <h3>💬 弹幕列表</h3>
       <button class="danmu-panel-close" @click="danmuPanelOpen = false">✕</button>
@@ -201,22 +225,49 @@ onUnmounted(() => {
     </div>
   </div>
 
+  <button
+    v-if="barCollapsed"
+    type="button"
+    class="danmu-bar-restore"
+    aria-label="展开发送框"
+    title="展开发送框"
+    @click="setBarCollapsed(false)"
+  >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 14l6-6 6 6" />
+    </svg>
+    <span>弹幕</span>
+  </button>
+
   <!-- 弹幕输入栏 -->
-  <div class="danmu-bar">
+  <div class="danmu-bar" :class="{ 'is-collapsed': barCollapsed }" :aria-hidden="barCollapsed">
+    <button
+      type="button"
+      class="danmu-settings-toggle"
+      aria-label="收起发送框"
+      title="收起发送框"
+      @click="toggleBarCollapsed"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6 10l6 6 6-6" />
+      </svg>
+    </button>
     <button class="danmu-settings-toggle" @click="settingsOpen = !settingsOpen" title="弹幕设置">⚙️</button>
     <button class="danmu-settings-toggle" @click="danmuPanelOpen = !danmuPanelOpen" title="弹幕列表">📋</button>
     <input
       v-model="danmuInput"
       :maxlength="MAX_LEN"
       placeholder="说点什么..."
+      aria-label="弹幕内容"
+      :disabled="barCollapsed"
       @keydown.enter="sendDanmu"
     />
     <small class="danmu-counter">{{ danmuInput.length }}/{{ MAX_LEN }}</small>
-    <button @click="sendDanmu">发射 💕</button>
+    <button type="button" class="danmu-send" :disabled="barCollapsed" @click="sendDanmu">发射 💕</button>
   </div>
 
   <!-- 弹幕设置面板 -->
-  <div class="danmu-settings" :class="{ 'is-visible': settingsOpen }">
+  <div class="danmu-settings" :class="{ 'is-visible': settingsOpen && !barCollapsed }">
     <h3>弹幕设置</h3>
     <div class="danmu-settings-row">
       <span>开关</span>
@@ -292,29 +343,62 @@ onUnmounted(() => {
   display: flex; align-items: center; gap: 12px; padding: 14px 18px;
   border-radius: 20px; background: var(--glass-bg); backdrop-filter: blur(30px);
   border: 1px solid var(--glass-border); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  transform: translateY(0); opacity: 1;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.danmu-bar.is-collapsed {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(18px);
 }
 
 .danmu-bar input {
-  flex: 1; border: none; background: transparent;
+  flex: 1; min-width: 0; border: none; background: transparent;
   font-size: 15px; color: var(--text-primary); outline: none;
 }
 .danmu-bar input::placeholder { color: var(--text-secondary); }
 .danmu-counter { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
-.danmu-bar button:last-child {
-  border: none; padding: 8px 20px; border-radius: 12px;
+.danmu-send {
+  border: none; padding: 8px 20px; border-radius: 12px; flex-shrink: 0; white-space: nowrap;
   background: linear-gradient(135deg, var(--primary), var(--secondary));
   color: #fff; font-weight: 500; cursor: pointer;
-  box-shadow: 0 4px 12px rgba(255, 107, 157, 0.3); transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(255, 107, 157, 0.3); transition: transform 0.2s;
 }
-.danmu-bar button:last-child:hover { transform: translateY(-2px); }
+.danmu-send:hover { transform: translateY(-2px); }
+.danmu-send:focus-visible,
+.danmu-settings-toggle:focus-visible,
+.danmu-bar-restore:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 .danmu-settings-toggle {
-  width: 40px; height: 40px; padding: 0; border-radius: 12px;
+  width: 40px; height: 40px; padding: 0; border-radius: 12px; flex-shrink: 0;
   font-size: 18px; display: flex; align-items: center; justify-content: center;
   border: none; background: transparent; color: #fff; cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.2s;
 }
 .danmu-settings-toggle:hover { background: rgba(255, 255, 255, 0.1); }
+.danmu-settings-toggle svg {
+  width: 20px; height: 20px; fill: none; stroke: currentColor;
+  stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
+}
+
+.danmu-bar-restore {
+  position: fixed; left: calc(24px + var(--safe-left)); bottom: var(--fab-bottom); z-index: 4;
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: var(--touch-min); padding: 0 16px 0 12px; border-radius: 16px;
+  border: 1px solid var(--glass-border); background: var(--glass-bg);
+  backdrop-filter: blur(30px); color: var(--text-primary);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); cursor: pointer;
+  font-size: 14px; font-weight: 500;
+}
+.danmu-bar-restore:hover { background: rgba(255, 255, 255, 0.14); }
+.danmu-bar-restore svg {
+  width: 18px; height: 18px; fill: none; stroke: currentColor;
+  stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
+}
 
 /* Settings panel */
 .danmu-settings {
@@ -423,7 +507,7 @@ onUnmounted(() => {
     display: none;
   }
 
-  .danmu-bar button:last-child {
+  .danmu-send {
     padding: 6px 14px;
     font-size: 13px;
     min-height: var(--touch-min);
@@ -433,6 +517,10 @@ onUnmounted(() => {
     width: var(--touch-min);
     height: var(--touch-min);
     font-size: 16px;
+  }
+
+  .danmu-bar-restore {
+    left: calc(12px + var(--safe-left));
   }
 
   .danmu-settings {
@@ -457,6 +545,15 @@ onUnmounted(() => {
 
   .danmu-panel-item {
     padding: 8px 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .danmu-bar,
+  .danmu-send,
+  .danmu-settings,
+  .danmu-panel {
+    transition: none;
   }
 }
 </style>
