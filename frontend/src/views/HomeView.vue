@@ -243,10 +243,9 @@ h1 {
   font-weight: 300;
   line-height: 1.5;
   padding: 16px 24px;
-  background: var(--glass-bg);
-  backdrop-filter: blur(20px);
-  border-radius: 16px;
+  background: none;
   border: none;
+  box-shadow: none;
 }
 
 /* 拆字后空格会被折叠，保留原样才不会把词粘在一起 */
@@ -257,12 +256,9 @@ h1 {
 
 /* ===== 歌词漂浮效果，由右上角 LyricFxSwitcher 切换 ===== */
 
-/* 整卡轻浮：卡片整体浮动 + 投影同步呼吸 */
+/* 整卡轻浮：歌词整体缓慢上下浮动 */
 .fx-float {
   animation: lyric-float-card 6s ease-in-out infinite;
-}
-.fx-float .lyrics {
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.3);
 }
 
 @keyframes lyric-float-card {
