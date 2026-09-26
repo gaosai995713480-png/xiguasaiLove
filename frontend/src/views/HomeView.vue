@@ -70,7 +70,6 @@ async function logout() {
       <button class="btn-ghost" title="登出" @click="logout">退出</button>
     </div>
 
-    <h1>心动告白</h1>
     <button class="signature signature-btn" type="button" :title="`查看 ${TOGETHER_START}`" @click="router.push(`/day/${TOGETHER_START}`)">在一起 {{ togetherDays }} 天 ❤️</button>
 
     <MemoryCard />
@@ -136,18 +135,6 @@ async function logout() {
   display: flex;
   gap: 8px;
   align-items: center;
-}
-
-h1 {
-  margin: 0 0 8px;
-  font-size: clamp(42px, 6vw, 72px);
-  font-weight: 700;
-  letter-spacing: -1px;
-  background: linear-gradient(135deg, #fff 0%, rgba(255, 255, 255, 0.7) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: title-glow 3s ease-in-out infinite;
 }
 
 .signature {
@@ -219,11 +206,6 @@ h1 {
 @keyframes glow-pulse {
   0%, 100% { opacity: 0.4; transform: scale(1); }
   50% { opacity: 0.8; transform: scale(1.15); }
-}
-
-@keyframes title-glow {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.85; }
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
