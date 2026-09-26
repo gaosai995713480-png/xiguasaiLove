@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useMusicStore } from '../stores/music'
@@ -23,10 +23,19 @@ const danmuRef = ref(null)
 
 // ===== Together Days =====
 const TOGETHER_START = '2023-10-26'
-const startDate = new Date(TOGETHER_START)
-const togetherDays = computed(() => {
-  const now = new Date()
-  return Math.floor((now - startDate) / (1000 * 60 * 60 * 24))
+const startDate = new Date(`${TOGETHER_START}T00:00:00`)
+const nowMs = ref(Date.now())
+let togetherTimer = 0
+
+const togetherLabel = computed(() => {
+  const elapsed = Math.max(0, nowMs.value - startDate.getTime())
+  const totalSeconds = Math.floor(elapsed / 1000)
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${days} 天 ${pad(hours)} 时 ${pad(minutes)} 分 ${pad(seconds)} 秒`
 })
 
 // ===== Lyrics display =====
@@ -44,6 +53,13 @@ const lyricChars = computed(() => (lyricFxStore.isPerChar ? [...currentLyric.val
 // 管理员设置的全局 BGM，任何账号进首页都自动播放
 onMounted(() => {
   musicStore.startBgm()
+  togetherTimer = window.setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+})
+
+onUnmounted(() => {
+  window.clearInterval(togetherTimer)
 })
 
 // ===== Logout =====
@@ -70,7 +86,7 @@ async function logout() {
       <button class="btn-ghost" title="登出" @click="logout">退出</button>
     </div>
 
-    <button class="signature signature-btn" type="button" :title="`查看 ${TOGETHER_START}`" @click="router.push(`/day/${TOGETHER_START}`)">在一起 {{ togetherDays }} 天 ❤️</button>
+    <button class="signature signature-btn" type="button" :title="`查看 ${TOGETHER_START}`" @click="router.push(`/day/${TOGETHER_START}`)">在一起 {{ togetherLabel }} ❤️</button>
 
     <MemoryCard />
 
@@ -138,19 +154,23 @@ async function logout() {
 }
 
 .signature {
-  font-size: clamp(18px, 3vw, 24px);
+  font-size: clamp(16px, 2.6vw, 22px);
   opacity: 0.9;
   line-height: 1.6;
   font-weight: 300;
   margin-bottom: 20px;
+  font-variant-numeric: tabular-nums;
 }
 
 .signature-btn {
   display: inline-block;
+  max-width: 100%;
   border: none;
   background: transparent;
   color: inherit;
   font: inherit;
+  font-variant-numeric: tabular-nums;
+  white-space: normal;
   cursor: pointer;
 }
 
