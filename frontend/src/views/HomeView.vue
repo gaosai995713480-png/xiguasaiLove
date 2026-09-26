@@ -246,7 +246,7 @@ h1 {
   background: var(--glass-bg);
   backdrop-filter: blur(20px);
   border-radius: 16px;
-  border: 1px solid var(--glass-border);
+  border: none;
 }
 
 /* 拆字后空格会被折叠，保留原样才不会把词粘在一起 */
