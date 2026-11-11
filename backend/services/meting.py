@@ -16,7 +16,10 @@ load_dotenv(_project_root / ".env")
 logger = logging.getLogger(__name__)
 
 METING_CLI_PATH = str(_project_root / "meting" / "meting-cli.mjs")
+# 历史平台仍保留在解析白名单里，仅用于已存在歌曲的兼容播放。
+# 新增歌曲、搜索和点歌台只允许 MUSIC_PLATFORMS。
 METING_PLATFORMS = {"netease", "tencent", "kugou", "baidu", "kuwo"}
+MUSIC_PLATFORMS = {"netease"}
 
 
 def call_meting(command: str, **kwargs) -> dict:

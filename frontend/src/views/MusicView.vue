@@ -18,21 +18,16 @@ const searchKeyword = ref('')
 const searchResults = ref([])
 const searchLoading = ref(false)
 const addById = ref('')
-const addPlatform = ref('netease')
 const lyricContainer = ref(null)
 
-const platforms = [
-  { value: 'netease', label: '网易云' },
-  { value: 'tencent', label: 'QQ音乐' },
-  { value: 'kugou', label: '酷狗' },
-  { value: 'kuwo', label: '酷我' },
-]
+// 音乐时光目前只接网易云，其他平台不再开放新增。
+const MUSIC_PLATFORM = 'netease'
 
 async function searchSongs() {
   if (!searchKeyword.value.trim()) return
   searchLoading.value = true
   try {
-    searchResults.value = await musicApi.search(searchKeyword.value, addPlatform.value)
+    searchResults.value = await musicApi.search(searchKeyword.value, MUSIC_PLATFORM)
   } catch { searchResults.value = [] }
   searchLoading.value = false
 }
@@ -44,7 +39,7 @@ async function addSong(song) {
       title: song.name,
       artist: song.artist?.join?.(' / ') || song.artist || '',
       album: song.album || '',
-      platform: addPlatform.value,
+      platform: MUSIC_PLATFORM,
     })
     showAddModal.value = false
     musicStore.loadSongs()
@@ -55,7 +50,7 @@ async function addSongById() {
   const id = addById.value.trim()
   if (!id) return
   try {
-    await musicApi.add({ netease_id: id, platform: addPlatform.value })
+    await musicApi.add({ netease_id: id, platform: MUSIC_PLATFORM })
     showAddModal.value = false
     addById.value = ''
     musicStore.loadSongs()
@@ -306,15 +301,7 @@ onMounted(() => musicStore.loadSongs())
 
   <!-- Add Modal -->
   <GlassModal v-model="showAddModal" title="🎵 添加歌曲">
-    <div class="platform-row">
-      <button
-        v-for="p in platforms"
-        :key="p.value"
-        class="plat-btn"
-        :class="{ 'is-active': addPlatform === p.value }"
-        @click="addPlatform = p.value"
-      >{{ p.label }}</button>
-    </div>
+    <p class="platform-hint">当前仅支持网易云音乐</p>
     <!-- Search -->
     <div class="search-row">
       <input v-model="searchKeyword" placeholder="搜索歌曲名..." @keydown.enter="searchSongs" />
@@ -336,14 +323,14 @@ onMounted(() => musicStore.loadSongs())
     <!-- Or by ID -->
     <div class="divider">或直接输入歌曲 ID</div>
     <div class="search-row">
-      <input v-model="addById" placeholder="输入歌曲ID" />
+      <input v-model="addById" placeholder="输入网易云歌曲 ID" />
       <button class="btn-primary" @click="addSongById">添加</button>
     </div>
   </GlassModal>
 
   <!-- Cookie Settings Modal -->
   <GlassModal v-model="showCookieModal" title="🔑 音乐平台 Cookie">
-    <p class="cookie-tip">配置 VIP Cookie 后可播放完整会员歌曲（而非 30 秒试听）</p>
+    <p class="cookie-tip">配置网易云 VIP Cookie 后可播放完整会员歌曲（而非 30 秒试听）</p>
     <div v-for="c in cookieList" :key="c.key" class="cookie-item">
       <label class="cookie-label">{{ c.label }}</label>
       <textarea
@@ -358,7 +345,7 @@ onMounted(() => musicStore.loadSongs())
         {{ cookieSaving ? '保存中...' : '💾 保存' }}
       </button>
     </div>
-    <p class="cookie-help">获取方式：浏览器登录音乐平台 → F12 → Application → Cookies</p>
+    <p class="cookie-help">获取方式：浏览器登录网易云音乐 → F12 → Application → Cookies，复制完整 Cookie</p>
   </GlassModal>
 
   <!-- 首页背景音乐设置（仅管理员）-->
@@ -503,9 +490,7 @@ onMounted(() => musicStore.loadSongs())
 .song-del:hover { background: rgba(255, 80, 80, 0.25); color: #fff; }
 
 /* Modal content */
-.platform-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
-.plat-btn { padding: 6px 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.15); background: transparent; color: var(--text-secondary); font-size: 13px; cursor: pointer; transition: all 0.2s; }
-.plat-btn.is-active { background: rgba(255, 255, 255, 0.15); color: #fff; border-color: var(--primary); }
+.platform-hint { margin: 0 0 12px; font-size: 12px; color: var(--text-secondary); text-align: center; }
 .search-row { display: flex; gap: 8px; margin-bottom: 12px; }
 .search-row input { flex: 1; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.06); color: #fff; font-size: 14px; outline: none; }
 .search-row input:focus { border-color: var(--primary); }
@@ -618,15 +603,6 @@ onMounted(() => musicStore.loadSongs())
 
   .setting-btn {
     font-size: 18px;
-  }
-
-  .platform-row {
-    gap: 6px;
-  }
-
-  .plat-btn {
-    padding: 5px 10px;
-    font-size: 12px;
   }
 
   .search-row .btn-primary {

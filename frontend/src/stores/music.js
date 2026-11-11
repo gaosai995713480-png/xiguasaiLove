@@ -25,6 +25,7 @@ export const useMusicStore = defineStore('music', () => {
       : url
   }
 
+  // 仅用于展示；新增歌曲只支持网易云，旧平台名称保留给历史歌单。
   const PLATFORM_NAMES = {
     netease: '网易云', tencent: 'QQ音乐',
     kugou: '酷狗', kuwo: '酷我', baidu: '千千',

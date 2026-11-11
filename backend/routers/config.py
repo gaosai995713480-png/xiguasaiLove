@@ -8,12 +8,17 @@ router = APIRouter(prefix="/api/config", tags=["config"])
 
 _CONFIG_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,49}$")
 
-# Cookie key 对应的平台显示名
+# Cookie key 对应的平台显示名（当前仅开放网易云）
 _PLATFORM_LABELS = {
     "METING_NETEASE_COOKIE": "网易云音乐",
-    "METING_TENCENT_COOKIE": "腾讯音乐/QQ音乐",
-    "METING_KUGOU_COOKIE": "酷狗音乐",
-    "METING_KUWO_COOKIE": "酷我音乐",
+}
+
+# 已下线的平台 Cookie：不再出现在系统配置表或音乐 Cookie 弹窗，
+# 但保留在数据库中，供历史歌曲兼容播放。
+_LEGACY_COOKIE_KEYS = {
+    "METING_TENCENT_COOKIE",
+    "METING_KUGOU_COOKIE",
+    "METING_KUWO_COOKIE",
 }
 
 _CONFIG_LABELS = {
@@ -72,6 +77,8 @@ def list_config_keys(_=Depends(require_role("admin"))):
     configs = get_all_configs()
     items = []
     for key, value in configs.items():
+        if key in _LEGACY_COOKIE_KEYS:
+            continue
         is_secret = any(hint in key for hint in _SECRET_HINTS)
         items.append({
             "key": key,

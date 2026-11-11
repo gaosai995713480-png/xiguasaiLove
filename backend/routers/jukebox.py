@@ -2,10 +2,11 @@
 import time
 from collections import defaultdict
 from fastapi import APIRouter, Request, Depends
+from fastapi.responses import JSONResponse
 from ..database import get_db
 from ..config import settings
 from ..dependencies import require_auth, require_role
-from ..services.meting import METING_PLATFORMS
+from ..services.meting import MUSIC_PLATFORMS
 
 router = APIRouter(prefix="/api", tags=["jukebox"])
 
@@ -62,14 +63,14 @@ def create_request(body: dict, request: Request):
     song_id = str(body.get("song_id", "")).strip()
     song_name = str(body.get("song_name", "")).strip()
     artist = str(body.get("artist", "")).strip()
-    platform = str(body.get("platform", "netease")).strip()
+    platform = str(body.get("platform") or "netease").strip()
     nickname = str(body.get("nickname", "")).strip() or "匿名访客"
     message = str(body.get("message", "")).strip()
 
     if not song_id or not song_name:
         return {"error": "song_id and song_name are required"}, 400
-    if platform not in METING_PLATFORMS:
-        platform = "netease"
+    if platform not in MUSIC_PLATFORMS:
+        return JSONResponse({"error": "目前仅支持网易云音乐"}, status_code=400)
 
     # 长度限制
     nickname = nickname[:30]

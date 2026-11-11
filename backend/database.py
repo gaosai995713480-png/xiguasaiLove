@@ -158,7 +158,7 @@ def init_tables():
                     song_name VARCHAR(100) NOT NULL COMMENT '歌曲名',
                     artist VARCHAR(100) NOT NULL COMMENT '歌手',
                     netease_id VARCHAR(20) NOT NULL COMMENT '平台歌曲ID',
-                    platform VARCHAR(20) NOT NULL DEFAULT 'netease' COMMENT '音乐平台：netease/tencent/kugou/kuwo',
+                    platform VARCHAR(20) NOT NULL DEFAULT 'netease' COMMENT '音乐平台：netease（历史数据可能含其他平台）',
                     sort_order INT DEFAULT 0 COMMENT '排序权重',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间'
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='歌单'
@@ -486,11 +486,10 @@ def init_tables():
 
 # ==================== 配置管理 ====================
 
+# 当前音乐功能只开放网易云；旧平台 Cookie 不再展示/迁移，
+# 但 get_all_cookies 仍会读取它们，供历史歌曲兼容播放。
 _COOKIE_ENV_KEYS = [
     "METING_NETEASE_COOKIE",
-    "METING_TENCENT_COOKIE",
-    "METING_KUGOU_COOKIE",
-    "METING_KUWO_COOKIE",
 ]
 
 
@@ -498,9 +497,13 @@ def _migrate_env_cookies(conn):
     """首次启动时，将 .env 中的 Cookie 迁移到数据库（仅当数据库中无记录时）"""
     import os
     with conn.cursor() as cursor:
-        cursor.execute("SELECT COUNT(*) FROM love_config WHERE config_key LIKE 'METING_%'")
+        placeholders = ",".join(["%s"] * len(_COOKIE_ENV_KEYS))
+        cursor.execute(
+            f"SELECT COUNT(*) FROM love_config WHERE config_key IN ({placeholders})",
+            tuple(_COOKIE_ENV_KEYS),
+        )
         if cursor.fetchone()[0] > 0:
-            return  # 数据库中已有记录，不覆盖
+            return  # 当前支持的 Cookie 已有记录，不覆盖
         for key in _COOKIE_ENV_KEYS:
             value = os.environ.get(key, "")
             if value:

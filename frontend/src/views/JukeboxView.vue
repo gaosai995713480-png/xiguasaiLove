@@ -25,20 +25,26 @@ async function loadRequests() {
 const searchKeyword = ref('')
 const searchResults = ref([])
 const searchLoading = ref(false)
-const searchPlatform = ref('netease')
 
-const platforms = [
-  { value: 'netease', label: '网易云' },
-  { value: 'tencent', label: 'QQ音乐' },
-  { value: 'kugou', label: '酷狗' },
-  { value: 'kuwo', label: '酷我' },
-]
+// 点歌台目前只接网易云；旧平台标签仅用于展示历史推荐。
+const MUSIC_PLATFORM = 'netease'
+const PLATFORM_LABELS = {
+  netease: '网易云',
+  tencent: 'QQ音乐',
+  kugou: '酷狗',
+  kuwo: '酷我',
+  baidu: '千千',
+}
+
+function platformLabel(platform) {
+  return PLATFORM_LABELS[platform] || platform || '网易云'
+}
 
 async function searchSongs() {
   if (!searchKeyword.value.trim()) return
   searchLoading.value = true
   try {
-    searchResults.value = await musicApi.search(searchKeyword.value, searchPlatform.value)
+    searchResults.value = await musicApi.search(searchKeyword.value, MUSIC_PLATFORM)
   } catch { searchResults.value = [] }
   searchLoading.value = false
 }
@@ -66,7 +72,7 @@ async function submitRecommend() {
       song_id: song.id,
       song_name: song.name || song.title || '',
       artist: song.artist?.join?.(' / ') || song.artist || '',
-      platform: searchPlatform.value,
+      platform: MUSIC_PLATFORM,
       nickname: nickname.value.trim() || '匿名访客',
       message: message.value.trim(),
     })
@@ -128,15 +134,7 @@ onMounted(() => loadRequests())
     <!-- 搜索推荐区 -->
     <div class="search-section">
       <h2 class="section-title">🎵 推荐一首歌给他们</h2>
-      <div class="platform-row">
-        <button
-          v-for="p in platforms"
-          :key="p.value"
-          class="plat-btn"
-          :class="{ 'is-active': searchPlatform === p.value }"
-          @click="searchPlatform = p.value"
-        >{{ p.label }}</button>
-      </div>
+      <p class="platform-hint">当前仅支持网易云音乐</p>
       <div class="search-row">
         <input
           v-model="searchKeyword"
@@ -184,7 +182,7 @@ onMounted(() => loadRequests())
               <div class="rc-song-name">{{ item.song_name }}</div>
               <div class="rc-artist">{{ item.artist }}</div>
             </div>
-            <span class="rc-platform">{{ platforms.find(p => p.value === item.platform)?.label || item.platform }}</span>
+            <span class="rc-platform">{{ platformLabel(item.platform) }}</span>
           </div>
           <div class="rc-message" v-if="item.message">「{{ item.message }}」</div>
           <div class="rc-footer">
@@ -266,16 +264,9 @@ onMounted(() => loadRequests())
   margin-bottom: 24px;
 }
 
-.platform-row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
-.plat-btn {
-  padding: 6px 14px; border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: transparent; color: var(--text-secondary);
-  font-size: 13px; cursor: pointer; transition: all 0.2s;
-}
-.plat-btn.is-active {
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff; border-color: var(--primary);
+.platform-hint {
+  margin: 0 0 12px; font-size: 12px;
+  color: var(--text-secondary); text-align: center;
 }
 
 .search-row { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -454,11 +445,6 @@ onMounted(() => loadRequests())
 
   .section-title {
     font-size: 18px;
-  }
-
-  .plat-btn {
-    padding: 5px 10px;
-    font-size: 12px;
   }
 
   .search-row .btn-primary {

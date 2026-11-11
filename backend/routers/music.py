@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from ..database import get_db, get_config, set_config
 from ..config import settings
 from ..dependencies import require_auth, require_role
-from ..services.meting import call_meting, METING_PLATFORMS
+from ..services.meting import call_meting, METING_PLATFORMS, MUSIC_PLATFORMS
 from ..services.oss_storage import (
     upload_to_oss, get_oss_bucket, delete_from_oss,
 )
@@ -66,9 +66,9 @@ def add_music(body: dict, _=Depends(require_auth)):
     if not netease_id:
         return {"error": "netease_id or id is required"}, 400
 
-    platform = str(body.get("platform", "netease")).strip()
-    if platform not in METING_PLATFORMS:
-        platform = "netease"
+    platform = str(body.get("platform") or "netease").strip()
+    if platform not in MUSIC_PLATFORMS:
+        return JSONResponse({"error": "目前仅支持网易云音乐"}, status_code=400)
 
     song_name = str(body.get("title", body.get("song_name", ""))).strip()
     artist = str(body.get("artist", "")).strip()
@@ -121,8 +121,9 @@ def delete_music(id: int, _=Depends(require_auth)):
 def search_music(keyword: str = "", platform: str = "netease", limit: int = 10):
     if not keyword:
         return {"error": "keyword is required"}, 400
-    if platform not in METING_PLATFORMS:
-        platform = "netease"
+    platform = str(platform or "netease").strip()
+    if platform not in MUSIC_PLATFORMS:
+        return JSONResponse({"error": "目前仅支持网易云音乐"}, status_code=400)
     result = call_meting("search", platform=platform, keyword=keyword, limit=str(limit))
     data = result.get("data", []) if result.get("ok") else []
     return data
