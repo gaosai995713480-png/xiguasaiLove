@@ -5,6 +5,7 @@ import TopBar from '../components/TopBar.vue'
 import GlassModal from '../components/GlassModal.vue'
 import { timelineApi } from '../api'
 import { useAuthStore } from '../stores/auth'
+import { todayInShanghai } from '../utils/dayDate'
 const authStore = useAuthStore()
 
 const router = useRouter()
@@ -17,7 +18,7 @@ async function load() {
 }
 
 function openAdd() {
-  form.value = { date: new Date().toISOString().split('T')[0], title: '', content: '', icon: '💕' }
+  form.value = { date: todayInShanghai(), title: '', content: '', icon: '💕' }
   showModal.value = true
 }
 

@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { reactive } from 'vue'
+import { nextTick, reactive } from 'vue'
 
 const mockGet = vi.fn()
 const mockPush = vi.fn()
@@ -24,10 +24,11 @@ vi.mock('vue-router', () => ({
 }))
 
 const flushPromises = () => Promise.resolve().then(() => Promise.resolve())
+const mountedWrappers = []
 
 async function mountView() {
   const { default: DayDetailView } = await import('../views/DayDetailView.vue')
-  return mount(DayDetailView, {
+  const wrapper = mount(DayDetailView, {
     global: {
       stubs: {
         TopBar: { template: '<div><slot /></div>' },
@@ -35,12 +36,18 @@ async function mountView() {
       },
     },
   })
+  mountedWrappers.push(wrapper)
+  return wrapper
 }
 
 describe('DayDetailView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     routeState.params.date = '2023-10-26'
+  })
+
+  afterEach(() => {
+    while (mountedWrappers.length) mountedWrappers.pop().unmount()
   })
 
   it('把当天的心情、故事、足迹和照片拼在同一页', async () => {
@@ -115,5 +122,46 @@ describe('DayDetailView', () => {
     expect(mockPush).toHaveBeenCalledWith('/day/2023-10-25')
     await buttons[1].trigger('click')
     expect(mockPush).toHaveBeenCalledWith('/day/2023-10-27')
+  })
+
+  it('旧日期响应晚返回时不会覆盖当前日期', async () => {
+    let resolveFirst
+    let resolveSecond
+    mockGet
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve }))
+
+    const wrapper = await mountView()
+    await nextTick()
+    await flushPromises()
+    expect(mockGet).toHaveBeenCalledTimes(1)
+
+    routeState.params.date = '2023-10-27'
+    await nextTick()
+    expect(mockGet).toHaveBeenCalledTimes(2)
+
+    resolveSecond({
+      date: '2023-10-27',
+      mood: { emoji: '🥰', note: '新日期', level: 5 },
+      timeline: [],
+      places: [],
+      photos: [],
+      gallery_unlocked: true,
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('新日期')
+
+    resolveFirst({
+      date: '2023-10-26',
+      mood: { emoji: '😢', note: '旧日期', level: 1 },
+      timeline: [],
+      places: [],
+      photos: [],
+      gallery_unlocked: true,
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('新日期')
+    expect(wrapper.text()).not.toContain('旧日期')
   })
 })

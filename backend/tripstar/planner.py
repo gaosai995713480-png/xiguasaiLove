@@ -386,10 +386,7 @@ class TripStarPlanner:
     def plan(self, request: TripStarRequest, progress: ProgressCallback) -> dict[str, Any]:
         if self.settings.effective_mock_mode:
             return self._mock_plan(request, progress)
-        try:
-            return RealTripStarPlanner(self.settings).plan(request, progress)
-        except Exception as exc:
-            return self._fallback_to_mock_after_real_error(request, progress, exc)
+        return RealTripStarPlanner(self.settings).plan(request, progress)
 
     def _mock_plan(self, request: TripStarRequest, progress: ProgressCallback) -> dict[str, Any]:
         stages = [
@@ -469,20 +466,6 @@ class TripStarPlanner:
             },
             "mock_mode": True,
         }
-
-    def _fallback_to_mock_after_real_error(
-        self,
-        request: TripStarRequest,
-        progress: ProgressCallback,
-        exc: Exception,
-    ) -> dict[str, Any]:
-        progress("fallback", "真实 TripStar 智能体调用失败，正在切换到安全 mock 规划...", 20)
-        result = self._mock_plan(request, progress)
-        result["message"] = "真实 TripStar 智能体尚未启用或调用失败，已使用 mock 模式生成旅行计划"
-        result["mock_mode"] = True
-        result["real_planner_ready"] = False
-        result["real_planner_error"] = str(exc)
-        return result
 
     def _mock_attractions_for_day(self, request: TripStarRequest, day_index: int) -> list[dict[str, Any]]:
         presets = self._poi_catalog_for_city(request.city)

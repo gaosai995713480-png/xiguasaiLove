@@ -74,8 +74,8 @@ async function resumeLatestTaskIfNeeded() {
   try {
     await tripstarApi.getStatus(rememberedTaskId)
     router.replace(`/tripstar/result/${rememberedTaskId}`)
-  } catch {
-    clearRememberedTripStarTask()
+  } catch (error) {
+    if (error?.status === 404) clearRememberedTripStarTask()
   }
 }
 

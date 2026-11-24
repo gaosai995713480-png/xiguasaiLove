@@ -16,7 +16,14 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from backend.config import settings
-from backend.dependencies import SESSION_COOKIE_NAME, UserInfo, _sessions, create_session
+from backend.dependencies import (
+    SESSION_COOKIE_NAME,
+    UserInfo,
+    _cache_session,
+    _session_expiries,
+    _sessions,
+    _sessions_lock,
+)
 from backend.main import app
 from backend.services import backup as backup_service
 
@@ -25,14 +32,17 @@ RUNTIME_ROOT = Path(__file__).resolve().parent / "_runtime"
 
 
 class FakeCursor:
-    def __init__(self, payload, executed=None):
+    def __init__(self, payload, executed=None, fail_table=None):
         self.payload = payload
         self.executed = executed if executed is not None else []
+        self.fail_table = fail_table.lower() if fail_table else None
         self._rows = []
 
     def execute(self, sql, params=None):
         self.executed.append(" ".join(str(sql).split()))
         text = self.executed[-1].lower()
+        if self.fail_table and self.fail_table in text:
+            raise RuntimeError(f"simulated query failure: {self.fail_table}")
         self._rows = []
         mapping = [
             ("love_cooking_menu_items", "menu_items"),
@@ -66,8 +76,8 @@ class FakeCursor:
 
 
 class FakeConnection:
-    def __init__(self, payload, executed=None):
-        self.cursor_obj = FakeCursor(payload, executed)
+    def __init__(self, payload, executed=None, fail_table=None):
+        self.cursor_obj = FakeCursor(payload, executed, fail_table)
 
     def cursor(self):
         return self.cursor_obj
@@ -92,13 +102,18 @@ class FakeBucket:
 
 
 @contextmanager
-def fake_get_db(payload=None, executed=None):
-    yield FakeConnection(payload or {}, executed)
+def fake_get_db(payload=None, executed=None, fail_table=None):
+    yield FakeConnection(payload or {}, executed, fail_table)
 
 
 def login_as(role: str) -> TestClient:
     local = TestClient(app)
-    token = create_session(UserInfo(username=f"{role}_backup", role=role))
+    token = f"backup-{uuid4().hex}"
+    _cache_session(
+        token,
+        UserInfo(username=f"{role}_backup", role=role),
+        time.time() + 3600,
+    )
     local.cookies.set(SESSION_COOKIE_NAME, token)
     return local
 
@@ -116,7 +131,9 @@ def wait_status(admin: TestClient, *wanted, timeout=8.0):
 
 def setup_function():
     client.cookies.clear()
-    _sessions.clear()
+    with _sessions_lock:
+        _sessions.clear()
+        _session_expiries.clear()
     backup_service.reset_jobs()
 
 
@@ -283,6 +300,52 @@ def test_admin_export_zip_contains_memories_and_photos(monkeypatch):
     assert "love_users" not in joined
     assert "love_page_password" not in joined
     assert "ai_messages" not in joined
+
+
+def test_required_backup_query_failure_marks_job_failed(monkeypatch):
+    isolate_paths(monkeypatch)
+    monkeypatch.setattr(
+        backup_service,
+        "get_db",
+        lambda: fake_get_db(
+            sample_payload(),
+            fail_table=settings.timeline_table,
+        ),
+    )
+    monkeypatch.setattr(backup_service, "get_oss_bucket", lambda: None)
+
+    now = datetime.datetime.now()
+    job = backup_service.ExportJob(
+        id="failed-query-job",
+        status="packing",
+        filename="xiguasai-memory-test.zip",
+        created_at=now,
+        expires_at=now + backup_service.EXPORT_TTL,
+    )
+    with backup_service._lock:
+        backup_service._job = job
+
+    backup_service.run_export_job(job.id)
+
+    assert job.status == "failed"
+    assert "失败" in (job.error or "")
+    assert job.zip_path is None
+
+
+def test_optional_backup_query_failure_is_tolerated(monkeypatch):
+    monkeypatch.setattr(
+        backup_service,
+        "get_db",
+        lambda: fake_get_db(
+            sample_payload(),
+            fail_table="love_cooking_records",
+        ),
+    )
+
+    memories = backup_service.collect_memories()
+
+    assert memories["timeline"][0]["title"] == "在一起"
+    assert memories["cooking"]["records"] == []
 
 
 def test_second_export_while_packing_returns_same_job(monkeypatch):

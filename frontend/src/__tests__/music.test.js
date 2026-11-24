@@ -207,5 +207,54 @@ describe('useMusicStore', () => {
       expect(store.isPlaying).toBe(false)
       expect(store.playError).toBe('音频加载失败（NotSupportedError）')
     })
+
+    it('旧歌曲 URL 晚返回时不能覆盖后点的歌曲', async () => {
+      let resolveFirst
+      let resolveSecond
+      vi.mocked(musicApi.url)
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }))
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve }))
+
+      const store = useMusicStore()
+      store.songs = [
+        { id: 1, netease_id: '1', platform: 'netease', title: '第一首', artist: 'A' },
+        { id: 2, netease_id: '2', platform: 'netease', title: '第二首', artist: 'B' },
+      ]
+
+      const firstPlay = store.play(0)
+      const secondPlay = store.play(1)
+
+      resolveSecond({ url: 'https://example.com/second.mp3' })
+      await secondPlay
+      expect(store.audio.src).toBe('https://example.com/second.mp3')
+      expect(store.currentIndex).toBe(1)
+
+      resolveFirst({ url: 'https://example.com/first.mp3' })
+      await firstPlay
+
+      expect(store.audio.src).toBe('https://example.com/second.mp3')
+      expect(store.currentIndex).toBe(1)
+      expect(store.isPlaying).toBe(true)
+    })
+
+    it('旧歌词晚返回时不能覆盖当前歌曲歌词', async () => {
+      let resolveFirst
+      let resolveSecond
+      vi.mocked(musicApi.lyric)
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }))
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve }))
+
+      const store = useMusicStore()
+      const first = store.loadLyrics('1', 'netease')
+      const second = store.loadLyrics('2', 'netease')
+
+      resolveSecond({ lyric: '[00:01.00]第二首歌词' })
+      await second
+      expect(store.lyricLines.map(line => line.text)).toEqual(['第二首歌词'])
+
+      resolveFirst({ lyric: '[00:01.00]第一首歌词' })
+      await first
+      expect(store.lyricLines.map(line => line.text)).toEqual(['第二首歌词'])
+    })
   })
 })

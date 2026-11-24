@@ -5,6 +5,8 @@ import TopBar from '../components/TopBar.vue'
 import { expressApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 import { useContextStore } from '../stores/context'
+import { loadAmapFromConfig } from '../utils/amap'
+import { escapeHtml } from '../utils/security'
 const authStore = useAuthStore()
 const contextStore = useContextStore()
 
@@ -28,6 +30,8 @@ let map = null
 let mapMarkers = []
 let polyline = null
 const showMap = ref(false)
+const mapError = ref('')
+let queryRequestId = 0
 
 // 状态码映射
 const stateMap = {
@@ -93,34 +97,42 @@ async function queryExpress() {
   const num = trackingNum.value.trim()
   if (!num) { errorMsg.value = '请输入快递单号'; return }
   if (!selectedCom.value) { errorMsg.value = '请选择快递公司'; return }
+  const com = selectedCom.value
+  const queryPhone = phone.value.trim()
+  const requestId = ++queryRequestId
 
   errorMsg.value = ''
   loading.value = true
   result.value = null
+  mapError.value = ''
   // 销毁旧地图实例，防止二次查询时 DOM 重建但 map 实例脱离
   clearMap()
   if (map) { map.destroy(); map = null }
   showMap.value = false
 
   try {
-    const data = await expressApi.query(num, selectedCom.value, phone.value.trim())
+    const data = await expressApi.query(num, com, queryPhone)
+    if (requestId !== queryRequestId) return
 
     if (data.status === 'error') {
       errorMsg.value = data.message || '查询失败'
     } else if (data.message === 'ok' || data.status === '200') {
       result.value = data
-      const companyName = companies.value.find(c => c.code === selectedCom.value)?.name || selectedCom.value
+      const companyName = companies.value.find(c => c.code === com)?.name || com
       contextStore.setPageState(`正在查询物流【${companyName}】单号: ${num}，当前状态: ${getState(data.state).text}`)
+      saveHistory(num, com, companyName, queryPhone)
       // 查询成功后尝试渲染地图
       await nextTick()
-      initMapRoute(data.data || [])
+      if (requestId === queryRequestId) initMapRoute(data.data || [], requestId)
     } else {
       errorMsg.value = data.message || '未查询到物流信息'
     }
   } catch (e) {
+    if (requestId !== queryRequestId) return
     errorMsg.value = '网络错误，请重试'
+  } finally {
+    if (requestId === queryRequestId) loading.value = false
   }
-  loading.value = false
 }
 
 // 需要手机号的快递公司
@@ -131,17 +143,6 @@ function onComChange() {
 }
 
 // ===== 地图路线可视化 =====
-
-function loadAmapSDK() {
-  return new Promise((resolve) => {
-    if (window.AMap) { resolve(); return }
-    window._AMapSecurityConfig = { securityJsCode: 'ca6c1f4b7f9f6da24ab08e9f5497621a' }
-    const script = document.createElement('script')
-    script.src = 'https://webapi.amap.com/maps?v=2.0&key=5bf41e2540a12180a9208bbcaea7c696&plugin=AMap.Geocoder,AMap.Driving,AMap.CitySearch'
-    script.onload = resolve
-    document.head.appendChild(script)
-  })
-}
 
 function extractCityFromArea(areaName) {
   // 从 areaName 提取城市，如 "安徽,芜湖市,鸠江区" → "芜湖"
@@ -199,8 +200,9 @@ function clearMap() {
   }
 }
 
-async function initMapRoute(trackData) {
+async function initMapRoute(trackData, requestId) {
   if (!trackData || trackData.length === 0) return
+  const isCurrent = () => requestId === queryRequestId
 
   // 从时间正序遍历（API 返回倒序，所以 reverse）
   const reversed = [...trackData].reverse()
@@ -234,9 +236,18 @@ async function initMapRoute(trackData) {
 
   if (cityList.length < 2) return
 
-  await loadAmapSDK()
+  try {
+    await loadAmapFromConfig({
+      plugins: ['AMap.Geocoder', 'AMap.Driving', 'AMap.CitySearch'],
+    })
+  } catch (error) {
+    if (isCurrent()) mapError.value = error?.message || '高德地图加载失败'
+    return
+  }
+  if (!isCurrent()) return
   showMap.value = true
   await nextTick()
+  if (!isCurrent()) return
 
   if (!map) {
     map = new AMap.Map('express-map', {
@@ -251,13 +262,15 @@ async function initMapRoute(trackData) {
   // 地理编码所有城市
   const points = []
   for (const info of cityList) {
+    if (!isCurrent()) return
     const coords = await geocodeCity(info.city)
+    if (!isCurrent()) return
     if (coords) {
       points.push({ ...info, coords })
     }
   }
 
-  if (points.length < 2) return
+  if (points.length < 2 || !isCurrent()) return
 
   // 画标记
   points.forEach((p, i) => {
@@ -278,8 +291,8 @@ async function initMapRoute(trackData) {
     }
 
     const labelText = isLast
-      ? `<div class="marker-label current-label">📍 ${p.city}（当前）</div>`
-      : `<div class="marker-label">${isFirst ? '发 ' : ''}${p.city}</div>`
+      ? `<div class="marker-label current-label">📍 ${escapeHtml(p.city)}（当前）</div>`
+      : `<div class="marker-label">${isFirst ? '发 ' : ''}${escapeHtml(p.city)}</div>`
 
     const marker = new AMap.Marker({
       position: p.coords,
@@ -310,6 +323,7 @@ async function initMapRoute(trackData) {
       new AMap.LngLat(destination[0], destination[1]),
       { waypoints },
       (status, result) => {
+        if (!isCurrent() || !map) return
         if (status === 'complete' && result.routes && result.routes.length > 0) {
           // 提取路线坐标
           const routePath = []
@@ -331,15 +345,15 @@ async function initMapRoute(trackData) {
           map.setFitView([...mapMarkers, polyline], false, [60, 60, 60, 60])
         } else {
           // 驾车路线失败，回退到直线
-          drawFallbackLine(points)
+          if (isCurrent()) drawFallbackLine(points)
         }
       }
     )
   } catch {
-    drawFallbackLine(points)
+    if (isCurrent()) drawFallbackLine(points)
   }
 
-  map.setFitView(mapMarkers, false, [60, 60, 60, 60])
+  if (isCurrent() && map) map.setFitView(mapMarkers, false, [60, 60, 60, 60])
 
   // ===== 方案E：自动推断收货地 =====
   const inferredDest = inferDestCity(trackData, cityList)
@@ -347,10 +361,12 @@ async function initMapRoute(trackData) {
   if (!destCityName) {
     destCityName = await detectUserCity()
   }
+  if (!isCurrent()) return
   // 确保目的地不是已在地图上的最后一个城市（避免重复标记）
   const lastCity = cityList[cityList.length - 1]?.city
   if (destCityName && destCityName !== lastCity && !lastCity?.startsWith(destCityName) && !destCityName.startsWith(lastCity || '')) {
     const destCoords = await geocodeCity(destCityName)
+    if (!isCurrent()) return
     if (destCoords) {
       const lastPoint = points[points.length - 1]
       // 目的地 "收" 标记
@@ -362,7 +378,7 @@ async function initMapRoute(trackData) {
         content: destContent,
         offset: new AMap.Pixel(-12, -12),
         label: {
-          content: `<div class="marker-label dest-label">收 ${destCityName}</div>`,
+          content: `<div class="marker-label dest-label">收 ${escapeHtml(destCityName)}</div>`,
           direction: 'top',
         },
       })
@@ -381,7 +397,7 @@ async function initMapRoute(trackData) {
       map.add(remainLine)
       mapMarkers.push(remainLine)
 
-      map.setFitView(mapMarkers, false, [60, 60, 60, 60])
+      if (isCurrent()) map.setFitView(mapMarkers, false, [60, 60, 60, 60])
     }
   }
 }
@@ -450,9 +466,9 @@ function loadHistory() {
   } catch { historyList.value = [] }
 }
 
-function saveHistory(num, com, comName) {
+function saveHistory(num, com, comName, phoneSnapshot) {
   const list = historyList.value.filter(h => h.num !== num)
-  list.unshift({ num, com, comName, phone: phone.value.trim(), time: new Date().toLocaleString() })
+  list.unshift({ num, com, comName, phone: phoneSnapshot, time: new Date().toLocaleString() })
   historyList.value = list.slice(0, 10) // 最多保留10条
   localStorage.setItem(HISTORY_KEY, JSON.stringify(historyList.value))
 }
@@ -468,16 +484,6 @@ function useHistory(h) {
 function clearHistory() {
   historyList.value = []
   localStorage.removeItem(HISTORY_KEY)
-}
-
-// 查询成功时保存历史
-const originalQuery = queryExpress
-queryExpress = async function () {
-  await originalQuery()
-  if (result.value && (result.value.message === 'ok' || result.value.status === '200')) {
-    const comName = companies.value.find(c => c.code === selectedCom.value)?.name || selectedCom.value
-    saveHistory(trackingNum.value.trim(), selectedCom.value, comName)
-  }
 }
 
 // ===== 密钥配置管理（仅管理员） =====
@@ -520,6 +526,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  queryRequestId += 1
+  clearTimeout(detectTimer)
   clearMap()
   if (map) { map.destroy(); map = null }
 })
@@ -613,6 +621,8 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+
+      <p v-if="mapError" class="map-error">⚠️ {{ mapError }}</p>
 
       <!-- 地图路线 -->
       <div v-if="showMap" class="map-card glass-card">
@@ -727,6 +737,15 @@ onUnmounted(() => {
   border-radius: 20px;
   padding: 24px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.map-error {
+  margin: 0;
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: rgba(120, 30, 40, 0.85);
+  color: #fff;
+  font-size: 13px;
 }
 
 /* 查询卡片 */

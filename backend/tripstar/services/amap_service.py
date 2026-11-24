@@ -75,8 +75,11 @@ class AmapService:
                 response = client.get(url, params=request_params)
                 response.raise_for_status()
                 data = response.json()
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            raise AmapServiceError(f"高德地图服务请求失败（HTTP {status_code}）") from exc
         except httpx.HTTPError as exc:
-            raise AmapServiceError(f"高德地图服务请求失败：{exc}") from exc
+            raise AmapServiceError("高德地图服务网络请求失败") from exc
         except ValueError as exc:
             raise AmapServiceError("高德地图服务返回了无法解析的 JSON") from exc
 

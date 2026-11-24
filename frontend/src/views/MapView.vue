@@ -5,6 +5,8 @@ import TopBar from '../components/TopBar.vue'
 import GlassModal from '../components/GlassModal.vue'
 import { mapApi } from '../api'
 import { useAuthStore } from '../stores/auth'
+import { todayInShanghai } from '../utils/dayDate'
+import { loadAmapFromConfig } from '../utils/amap'
 import {
   createMapPhotoDrafts,
   createPendingPhotoDrafts,
@@ -21,16 +23,18 @@ const showForm = ref(false)
 const form = ref(createEmptyForm())
 const uploading = ref(false)
 const carouselIndex = ref(0)
+const mapError = ref('')
 let editingId = null
 let map = null
 let mapMarkers = []
 let polyline = null
+let viewActive = false
 
 function createEmptyForm() {
   return {
     name: '',
     note: '',
-    date: new Date().toISOString().split('T')[0],
+    date: todayInShanghai(),
     photos: [],
     lat: 0,
     lng: 0,
@@ -70,7 +74,7 @@ function openForm(name, lat, lng, data) {
   form.value = {
     name: data ? data.title : (name || ''),
     note: data ? (data.note || '') : '',
-    date: data ? (data.visit_date || '') : new Date().toISOString().split('T')[0],
+    date: data ? (data.visit_date || '') : todayInShanghai(),
     photos: createMapPhotoDrafts(data),
     lat, lng,
   }
@@ -262,23 +266,27 @@ function selectSearchResult(r) {
 
 // Load AMap SDK dynamically
 function loadAmapSDK() {
-  return new Promise((resolve) => {
-    if (window.AMap) { resolve(); return }
-    window._AMapSecurityConfig = { securityJsCode: 'ca6c1f4b7f9f6da24ab08e9f5497621a' }
-    const script = document.createElement('script')
-    script.src = 'https://webapi.amap.com/maps?v=2.0&key=5bf41e2540a12180a9208bbcaea7c696&plugin=AMap.PlaceSearch,AMap.AutoComplete,AMap.Geocoder'
-    script.onload = resolve
-    document.head.appendChild(script)
+  return loadAmapFromConfig({
+    plugins: ['AMap.PlaceSearch', 'AMap.AutoComplete', 'AMap.Geocoder'],
   })
 }
 
 onMounted(async () => {
-  await loadAmapSDK()
-  initMap()
-  initSearch()
+  viewActive = true
+  mapError.value = ''
+  try {
+    await loadAmapSDK()
+    if (!viewActive) return
+    initMap()
+    initSearch()
+  } catch (error) {
+    if (!viewActive) return
+    mapError.value = error?.message || '高德地图加载失败'
+  }
 })
 
 onUnmounted(() => {
+  viewActive = false
   revokeLocalPhotoDrafts(form.value.photos)
   if (searchTimer) clearTimeout(searchTimer)
   clearMapMarkers()
@@ -316,6 +324,7 @@ onUnmounted(() => {
   </div>
 
   <div id="map-container"></div>
+  <p v-if="mapError" class="map-error">⚠️ {{ mapError }}</p>
 
   <!-- FAB -->
   <button v-if="authStore.isAdmin" class="fab-add" @click="map && openForm('', map.getCenter().lat, map.getCenter().lng)">+</button>
@@ -393,6 +402,12 @@ onUnmounted(() => {
 .marker-count { margin-left: auto; font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
 
 #map-container { position: fixed; top: var(--topbar-height); left: 0; right: 0; bottom: var(--tabbar-height); }
+.map-error {
+  position: fixed; left: 50%; top: calc(var(--topbar-height) + 90px); z-index: 16;
+  transform: translateX(-50%); max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 14px; border-radius: 12px; background: rgba(120, 30, 40, 0.9);
+  color: #fff; font-size: 13px; line-height: 1.5; text-align: center;
+}
 
 .search-wrap { position: fixed; top: calc(var(--topbar-height) + 12px); left: 16px; right: 16px; z-index: 15; }
 .search-box { display: flex; align-items: center; gap: 8px; background: var(--glass-bg); backdrop-filter: blur(20px); border: 1px solid var(--glass-border); border-radius: 14px; padding: 8px 16px; }

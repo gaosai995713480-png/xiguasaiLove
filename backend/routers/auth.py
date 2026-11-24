@@ -1,4 +1,5 @@
 """认证路由 - 登录/注册/状态"""
+import hmac
 import json
 from fastapi import APIRouter, Request, Response
 from ..database import get_db, get_config
@@ -8,6 +9,7 @@ from ..dependencies import (
     create_session, destroy_session,
     set_login_cookie, clear_login_cookie,
 )
+from ..security import get_client_ip, login_ip_limiter, login_limiter, registration_limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -35,15 +37,27 @@ def auth_login(request: Request, body: dict = {}):
             media_type="application/json",
         )
 
+    client_ip = get_client_ip(request)
+    rate_key = f"login:{client_ip}:{username.casefold()}"
+    if not login_ip_limiter.allow(f"login-ip:{client_ip}") or not login_limiter.allow(rate_key):
+        return Response(
+            content='{"error": "登录尝试过于频繁，请稍后再试"}',
+            status_code=429,
+            media_type="application/json",
+        )
+
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                f"SELECT id, role, disabled FROM `{settings.users_table}` WHERE username = %s AND password = %s LIMIT 1",
-                (username, password),
+                f"SELECT id, role, disabled, password FROM `{settings.users_table}` "
+                "WHERE username = %s LIMIT 1",
+                (username,),
             )
             row = cursor.fetchone()
 
-    if not row:
+    if not row or not hmac.compare_digest(
+        str(row[3]).encode("utf-8"), password.encode("utf-8")
+    ):
         return Response(
             content='{"error": "用户名或密码错误"}',
             status_code=401,
@@ -57,6 +71,7 @@ def auth_login(request: Request, body: dict = {}):
         )
 
     token = create_session(UserInfo(username=username, role=row[1]))
+    login_limiter.reset(rate_key)
     
     # 记录最后登录时间
     with get_db() as conn:
@@ -85,6 +100,12 @@ def auth_register(request: Request, body: dict = {}):
         return Response(
             content='{"error": "请填写所有字段"}',
             status_code=400,
+            media_type="application/json",
+        )
+    if not registration_limiter.allow(f"register:{get_client_ip(request)}"):
+        return Response(
+            content='{"error": "注册尝试过于频繁，请稍后再试"}',
+            status_code=429,
             media_type="application/json",
         )
     if len(username) < 2 or len(username) > 20:
@@ -133,6 +154,7 @@ def auth_register(request: Request, body: dict = {}):
         conn.commit()
 
     # 注册后自动登录
+    registration_limiter.reset(f"register:{get_client_ip(request)}")
     token = create_session(UserInfo(username=username, role="visitor"))
     resp = Response(
         content=json.dumps({"ok": True, "username": username, "role": "visitor"}),
@@ -144,9 +166,10 @@ def auth_register(request: Request, body: dict = {}):
 
 @router.post("/logout")
 def auth_logout(request: Request):
-    destroy_session(request)
+    deleted = destroy_session(request)
     response = Response(
-        content='{"ok": true}',
+        content=json.dumps({"ok": deleted, "session_deleted": deleted}),
+        status_code=200 if deleted else 503,
         media_type="application/json",
     )
     clear_login_cookie(response)

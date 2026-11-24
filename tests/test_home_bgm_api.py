@@ -1,28 +1,35 @@
 import json
+import secrets
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.config import settings
-from backend.database import get_config, set_config
-from backend.dependencies import SESSION_COOKIE_NAME, UserInfo, create_session
+from backend.dependencies import SESSION_COOKIE_NAME, UserInfo, _cache_session
 from backend.routers import music
 from backend.main import app
 
 
 def _client_with_role(role: str) -> TestClient:
     local_client = TestClient(app)
-    token = create_session(UserInfo(username=f"{role}_bgm_tester", role=role))
+    token = secrets.token_urlsafe(16)
+    _cache_session(
+        token,
+        UserInfo(username=f"{role}_bgm_tester", role=role),
+        time.time() + 3600,
+    )
     local_client.cookies.set(SESSION_COOKIE_NAME, token)
     return local_client
 
 
 @pytest.fixture
-def restore_bgm():
+def restore_bgm(monkeypatch):
     """用例会改写全局 BGM 配置，跑完还原，避免污染真实环境"""
-    original = get_config(music.BGM_CONFIG_KEY)
-    yield
-    set_config(music.BGM_CONFIG_KEY, original or "")
+    store = {"value": music.get_config(music.BGM_CONFIG_KEY) or ""}
+    monkeypatch.setattr(music, "get_config", lambda key: store.get("value", ""))
+    monkeypatch.setattr(music, "set_config", lambda key, value: store.__setitem__("value", value))
+    yield store
 
 
 @pytest.fixture
@@ -158,7 +165,7 @@ def test_oss_bgm_missing_object_is_disabled(restore_bgm, monkeypatch):
             raise AssertionError("missing object must not be signed")
 
     monkeypatch.setattr(music, "get_oss_bucket", lambda: FakeBucket())
-    set_config(
+    music.set_config(
         music.BGM_CONFIG_KEY,
         json.dumps(
             {
@@ -188,7 +195,7 @@ def test_oss_bgm_existing_object_returns_signed_url(restore_bgm, monkeypatch):
             return "https://oss.example/music/ok.mp3"
 
     monkeypatch.setattr(music, "get_oss_bucket", lambda: FakeBucket())
-    set_config(
+    music.set_config(
         music.BGM_CONFIG_KEY,
         json.dumps(
             {

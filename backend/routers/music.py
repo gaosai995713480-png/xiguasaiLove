@@ -2,11 +2,14 @@
 import json
 import time
 import logging
-from urllib.parse import unquote
+from collections import OrderedDict
+from threading import Lock
+from urllib.parse import unquote, urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 from ..database import get_db, get_config, set_config
 from ..config import settings
 from ..dependencies import require_auth, require_role
@@ -34,11 +37,39 @@ _AUDIO_FETCH_HEADERS = {
     ),
 }
 _URL_CACHE_TTL = 120
-_url_cache: dict[tuple[str, str], tuple[float, str]] = {}
+_URL_CACHE_MAX_ENTRIES = 512
+_MAX_AUDIO_STREAM_BYTES = 200 * 1024 * 1024
+_url_cache: OrderedDict[tuple[str, str], tuple[float, str]] = OrderedDict()
+_url_cache_lock = Lock()
+
+
+def _prune_url_cache_locked(now: float) -> None:
+    expired = [key for key, (expires_at, _) in _url_cache.items() if expires_at <= now]
+    for key in expired:
+        _url_cache.pop(key, None)
+    while len(_url_cache) > _URL_CACHE_MAX_ENTRIES:
+        _url_cache.popitem(last=False)
+
+
+def _get_cached_url(cache_key: tuple[str, str], now: float) -> tuple[bool, str]:
+    with _url_cache_lock:
+        _prune_url_cache_locked(now)
+        cached = _url_cache.get(cache_key)
+        if not cached:
+            return False, ""
+        _url_cache.move_to_end(cache_key)
+        return True, cached[1]
+
+
+def _store_cached_url(cache_key: tuple[str, str], expires_at: float, url: str) -> None:
+    with _url_cache_lock:
+        _url_cache[cache_key] = (expires_at, url)
+        _url_cache.move_to_end(cache_key)
+        _prune_url_cache_locked(time.time())
 
 
 @router.get("/music")
-def list_music():
+def list_music(_=Depends(require_auth)):
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -64,7 +95,7 @@ def list_music():
 def add_music(body: dict, _=Depends(require_auth)):
     netease_id = str(body.get("netease_id", body.get("id", ""))).strip()
     if not netease_id:
-        return {"error": "netease_id or id is required"}, 400
+        return JSONResponse({"error": "netease_id or id is required"}, status_code=400)
 
     platform = str(body.get("platform") or "netease").strip()
     if platform not in MUSIC_PLATFORMS:
@@ -104,7 +135,7 @@ def add_music(body: dict, _=Depends(require_auth)):
 @router.delete("/music")
 def delete_music(id: int, _=Depends(require_auth)):
     if id <= 0:
-        return {"error": "invalid id"}, 400
+        return JSONResponse({"error": "invalid id"}, status_code=400)
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -113,18 +144,24 @@ def delete_music(id: int, _=Depends(require_auth)):
             affected = cursor.rowcount
         conn.commit()
     if not affected:
-        return {"error": "not found"}, 404
+        return JSONResponse({"error": "not found"}, status_code=404)
     return {"ok": True}
 
 
 @router.get("/music/search")
-def search_music(keyword: str = "", platform: str = "netease", limit: int = 10):
+def search_music(
+    keyword: str = "",
+    platform: str = "netease",
+    limit: int = 10,
+    _=Depends(require_auth),
+):
     if not keyword:
-        return {"error": "keyword is required"}, 400
+        return JSONResponse({"error": "keyword is required"}, status_code=400)
     platform = str(platform or "netease").strip()
     if platform not in MUSIC_PLATFORMS:
         return JSONResponse({"error": "目前仅支持网易云音乐"}, status_code=400)
-    result = call_meting("search", platform=platform, keyword=keyword, limit=str(limit))
+    safe_limit = max(1, min(int(limit or 10), 50))
+    result = call_meting("search", platform=platform, keyword=keyword, limit=str(safe_limit))
     data = result.get("data", []) if result.get("ok") else []
     return data
 
@@ -147,10 +184,10 @@ def resolve_meting_url(song_id: str, platform: str) -> str:
     Chrome 在 HTTPS 页面里会直接报 NotSupportedError。
     """
     cache_key = (str(song_id), platform)
-    cached = _url_cache.get(cache_key)
     now = time.time()
-    if cached and cached[0] > now:
-        return cached[1]
+    hit, cached_url = _get_cached_url(cache_key, now)
+    if hit:
+        return cached_url
 
     result = call_meting("url", platform=platform, id=song_id)
     url = ""
@@ -160,21 +197,22 @@ def resolve_meting_url(song_id: str, platform: str) -> str:
     url = to_https_media_url(url)
     if not url:
         logger.warning("meting 未返回可播放直链 song_id=%s platform=%s", song_id, platform)
-        _url_cache[cache_key] = (now + 20, "")
+        _store_cached_url(cache_key, now + 20, "")
         return ""
-    _url_cache[cache_key] = (now + _URL_CACHE_TTL, url)
+    _store_cached_url(cache_key, now + _URL_CACHE_TTL, url)
     return url
 
 
 def playback_proxy_url(song_id: str, platform: str) -> str:
     """给浏览器的同源播放地址，避免混合内容和错误 Referer。"""
-    return f"/api/music/stream?id={song_id}&platform={platform}"
+    query = urlencode({"id": song_id, "platform": platform})
+    return f"/api/music/stream?{query}"
 
 
 @router.get("/music/url")
-def music_url(id: str = "", platform: str = "netease"):
+def music_url(id: str = "", platform: str = "netease", _=Depends(require_auth)):
     if not id:
-        return {"error": "id is required"}, 400
+        return JSONResponse({"error": "id is required"}, status_code=400)
     if platform not in METING_PLATFORMS:
         platform = "netease"
     if not resolve_meting_url(id, platform):
@@ -182,14 +220,31 @@ def music_url(id: str = "", platform: str = "netease"):
     return {"url": playback_proxy_url(id, platform)}
 
 
+async def _open_audio_upstream(url: str, headers: dict[str, str]):
+    timeout = httpx.Timeout(20.0, connect=10.0, read=60.0, write=20.0, pool=10.0)
+    client = httpx.AsyncClient(timeout=timeout, follow_redirects=True)
+    try:
+        request = client.build_request("GET", url, headers=headers)
+        response = await client.send(request, stream=True)
+        return client, response
+    except BaseException:
+        await client.aclose()
+        raise
+
+
 @router.get("/music/stream")
-def music_stream(request: Request, id: str = "", platform: str = "netease"):
+async def music_stream(
+    request: Request,
+    id: str = "",
+    platform: str = "netease",
+    _=Depends(require_auth),
+):
     """把平台 CDN 音频同源转发给浏览器。"""
     if not id:
         return JSONResponse({"error": "id is required"}, status_code=400)
     if platform not in METING_PLATFORMS:
         platform = "netease"
-    url = resolve_meting_url(id, platform)
+    url = await run_in_threadpool(resolve_meting_url, id, platform)
     if not url:
         return JSONResponse({"error": "暂无播放源"}, status_code=404)
 
@@ -198,8 +253,8 @@ def music_stream(request: Request, id: str = "", platform: str = "netease"):
     if range_header:
         headers["Range"] = range_header
     try:
-        upstream = httpx.get(url, headers=headers, follow_redirects=True, timeout=20)
-    except httpx.HTTPError:
+        client, upstream = await _open_audio_upstream(url, headers)
+    except (httpx.HTTPError, ValueError):
         logger.warning("拉取音源失败 song_id=%s", id, exc_info=True)
         return JSONResponse({"error": "音源拉取失败"}, status_code=502)
 
@@ -211,6 +266,8 @@ def music_stream(request: Request, id: str = "", platform: str = "netease"):
             upstream.status_code,
             content_type,
         )
+        await upstream.aclose()
+        await client.aclose()
         return JSONResponse({"error": "音源不可用"}, status_code=502)
 
     out_headers = {"Accept-Ranges": upstream.headers.get("accept-ranges", "bytes")}
@@ -218,8 +275,35 @@ def music_stream(request: Request, id: str = "", platform: str = "netease"):
         out_headers["Content-Range"] = upstream.headers["content-range"]
     if upstream.headers.get("content-length"):
         out_headers["Content-Length"] = upstream.headers["content-length"]
-    return Response(
-        content=upstream.content,
+        try:
+            if int(upstream.headers["content-length"]) > _MAX_AUDIO_STREAM_BYTES:
+                await upstream.aclose()
+                await client.aclose()
+                return JSONResponse({"error": "音源文件过大"}, status_code=413)
+        except ValueError:
+            pass
+    if upstream.headers.get("content-encoding"):
+        out_headers["Content-Encoding"] = upstream.headers["content-encoding"]
+
+    async def iter_audio():
+        sent = 0
+        try:
+            async for chunk in upstream.aiter_raw():
+                if not chunk:
+                    continue
+                sent += len(chunk)
+                if sent > _MAX_AUDIO_STREAM_BYTES:
+                    logger.warning("音源超过流式上限 song_id=%s", id)
+                    break
+                yield chunk
+        except httpx.HTTPError:
+            logger.warning("音源流读取中断 song_id=%s", id, exc_info=True)
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        iter_audio(),
         status_code=upstream.status_code,
         media_type=content_type,
         headers=out_headers,
@@ -227,9 +311,9 @@ def music_stream(request: Request, id: str = "", platform: str = "netease"):
 
 
 @router.get("/music/lyric")
-def music_lyric(id: str = "", platform: str = "netease"):
+def music_lyric(id: str = "", platform: str = "netease", _=Depends(require_auth)):
     if not id:
-        return {"error": "id is required"}, 400
+        return JSONResponse({"error": "id is required"}, status_code=400)
     if platform not in METING_PLATFORMS:
         platform = "netease"
     result = call_meting("lyric", platform=platform, id=id)

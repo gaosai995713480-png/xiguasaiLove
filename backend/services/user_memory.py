@@ -10,7 +10,10 @@ import json
 import logging
 from typing import Optional
 
+from starlette.concurrency import run_in_threadpool
+
 from ..database import get_db, get_config
+from .ai_chat import build_anthropic_messages_url, build_openai_chat_url
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +137,7 @@ AI: {ai_response[:500]}
             cfg = get_claude_config()
             if not cfg["api_key"]:
                 return []
-            url = f"{cfg['base_url'].rstrip('/')}/v1/messages"
+            url = build_anthropic_messages_url(cfg["base_url"])
             headers = {
                 "x-api-key": cfg["api_key"],
                 "anthropic-version": "2023-06-01",
@@ -159,7 +162,7 @@ AI: {ai_response[:500]}
             cfg = get_codex_config()
             if not cfg["api_key"]:
                 return []
-            url = f"{cfg['base_url'].rstrip('/')}/v1/chat/completions"
+            url = build_openai_chat_url(cfg["base_url"])
             headers = {
                 "Authorization": f"Bearer {cfg['api_key']}",
                 "Content-Type": "application/json",
@@ -193,7 +196,7 @@ AI: {ai_response[:500]}
                 category = str(fact.get("category", "general")).strip()
                 if category not in ("general", "date", "preference", "person"):
                     category = "general"
-                save_fact(username, content, category, source="auto")
+                await run_in_threadpool(save_fact, username, content, category, "auto")
                 saved.append(content)
 
         if saved:

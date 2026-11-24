@@ -116,9 +116,6 @@ describe('CookbookView', () => {
 
     expect(mockUpdateState).toHaveBeenCalledWith(1, {
       is_favorite: true,
-      want_to_cook: false,
-      rating: undefined,
-      note: '',
     })
     expect(mockRecipeList).toHaveBeenCalledTimes(2)
   })

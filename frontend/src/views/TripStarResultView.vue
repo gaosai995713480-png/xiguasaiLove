@@ -20,6 +20,7 @@ const polling = ref(false)
 
 let timer = null
 let requestInFlight = false
+let consecutiveErrors = 0
 
 const plan = computed(() => result.value?.data || null)
 const budgetItems = computed(() => plan.value?.budget?.items || [])
@@ -34,9 +35,11 @@ function stopPolling() {
 }
 
 function applyStatus(payload) {
+  consecutiveErrors = 0
   status.value = payload.status || 'processing'
   progress.value = Number(payload.progress || 0)
   message.value = payload.message || payload.progress_text || ''
+  errorMsg.value = payload.error || ''
   if (payload.result) {
     result.value = payload.result
   }
@@ -55,11 +58,18 @@ async function loadStatus() {
     const payload = await tripstarApi.getStatus(taskId.value)
     applyStatus(payload)
   } catch (error) {
-    status.value = 'failed'
-    progress.value = 100
-    errorMsg.value = error?.message || '查询 TripStar 任务状态失败'
-    message.value = errorMsg.value
-    stopPolling()
+    consecutiveErrors += 1
+    const fatal = error?.status === 404 || error?.status === 403
+    if (fatal || consecutiveErrors >= 3) {
+      status.value = 'failed'
+      progress.value = 100
+      errorMsg.value = error?.message || '查询 TripStar 任务状态失败'
+      message.value = errorMsg.value
+      stopPolling()
+    } else {
+      errorMsg.value = error?.message || '查询 TripStar 任务状态失败'
+      message.value = `状态查询暂时失败，正在重试（${consecutiveErrors}/3）...`
+    }
   } finally {
     requestInFlight = false
   }
@@ -72,6 +82,7 @@ function startPolling() {
 }
 
 function retry() {
+  consecutiveErrors = 0
   clearRememberedTripStarTask()
   router.push('/tripstar')
 }

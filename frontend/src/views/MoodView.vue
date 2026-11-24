@@ -1,11 +1,14 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import TopBar from '../components/TopBar.vue'
 import GlassModal from '../components/GlassModal.vue'
 import { moodApi } from '../api'
+import { useAuthStore } from '../stores/auth'
+import { todayInShanghai } from '../utils/dayDate'
 
 const router = useRouter()
+const authStore = useAuthStore()
 const MOODS = ['😆', '😊', '😌', '😐', '😢', '😤', '🥰', '😴', '🤔', '🎉']
 const LEVEL_LABELS = ['低落', '一般', '还行', '开心', '超开心']
 
@@ -17,22 +20,30 @@ const selectedDate = ref('')
 const selectedEmoji = ref('😊')
 const selectedLevel = ref(3)
 const noteInput = ref('')
+let monthRequestId = 0
 
 const weekdays = ['日', '一', '二', '三', '四', '五', '六']
 
 async function loadMonth() {
+  const requestId = ++monthRequestId
+  const year = currentYear.value
+  const month = currentMonth.value
   try {
-    const items = await moodApi.list(currentYear.value, currentMonth.value)
+    const items = await moodApi.list(year, month)
+    if (requestId !== monthRequestId) return
     const map = {}
     items.forEach(item => { map[item.mood_date] = item })
     moodData.value = map
-  } catch { moodData.value = {} }
+  } catch {
+    if (requestId !== monthRequestId) return
+    moodData.value = {}
+  }
 }
 
 function getCalendarDays() {
   const firstDay = new Date(currentYear.value, currentMonth.value - 1, 1).getDay()
   const daysInMonth = new Date(currentYear.value, currentMonth.value, 0).getDate()
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayInShanghai()
   const days = []
   for (let i = 0; i < firstDay; i++) days.push({ empty: true })
   for (let d = 1; d <= daysInMonth; d++) {
@@ -54,6 +65,7 @@ function getStats() {
 }
 
 function openPicker(dateStr, existing) {
+  if (!authStore.isAdmin) return
   selectedDate.value = dateStr
   selectedEmoji.value = existing ? existing.emoji : '😊'
   selectedLevel.value = existing ? existing.level : 3
@@ -62,11 +74,21 @@ function openPicker(dateStr, existing) {
 }
 
 async function save() {
+  if (!authStore.isAdmin) return
   try {
     await moodApi.save({ mood_date: selectedDate.value, emoji: selectedEmoji.value, note: noteInput.value, level: selectedLevel.value })
     showModal.value = false
     loadMonth()
   } catch { alert('保存失败') }
+}
+
+function onDayClick(cell) {
+  if (cell.empty) return
+  if (authStore.isAdmin) {
+    openPicker(cell.dateStr, cell.mood)
+  } else {
+    router.push(`/day/${cell.dateStr}`)
+  }
 }
 
 function prevMonth() {
@@ -82,6 +104,9 @@ function nextMonth() {
 }
 
 onMounted(loadMonth)
+onUnmounted(() => {
+  monthRequestId += 1
+})
 </script>
 
 <template>
@@ -115,7 +140,7 @@ onMounted(loadMonth)
           'has-mood': cell.mood,
           [`level-${cell.mood?.level}`]: cell.mood,
         }"
-        @click="!cell.empty && openPicker(cell.dateStr, cell.mood)"
+        @click="onDayClick(cell)"
       >
         <span v-if="cell.mood" class="emoji">{{ cell.mood.emoji }}</span>
         <span class="day-num" :style="{ fontSize: cell.mood ? '11px' : '14px' }">{{ cell.day }}</span>
@@ -124,7 +149,7 @@ onMounted(loadMonth)
   </div>
 
   <!-- Mood Picker Modal -->
-  <GlassModal v-model="showModal" title="今天心情如何？">
+  <GlassModal v-if="authStore.isAdmin" v-model="showModal" title="今天心情如何？">
     <div class="date-info">{{ selectedDate }}</div>
     <div class="emoji-picker">
       <button

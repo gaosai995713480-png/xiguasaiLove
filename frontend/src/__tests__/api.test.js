@@ -9,7 +9,7 @@ const mockFetch = vi.fn()
 vi.stubGlobal('fetch', mockFetch)
 
 // 动态导入以确保 mock 生效
-let danmuApi, authApi, dayApi, backupApi
+let danmuApi, authApi, dayApi, backupApi, fetchWithAuth
 
 beforeEach(async () => {
   vi.resetModules()
@@ -19,6 +19,11 @@ beforeEach(async () => {
   authApi = api.authApi
   dayApi = api.dayApi
   backupApi = api.backupApi
+  fetchWithAuth = api.fetchWithAuth
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('danmuApi', () => {
@@ -197,5 +202,19 @@ describe('backupApi', () => {
     expect(mockFetch.mock.calls[0][0]).toBe('/api/backup/export/download')
     expect(result.filename).toBe('xiguasai-memory-2026-09-18.zip')
     expect(result.blob).toBeInstanceOf(Blob)
+  })
+})
+
+describe('fetchWithAuth', () => {
+  it('401 时跳转登录并抛出可识别的未授权错误', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+    })
+
+    await expect(fetchWithAuth('/api/private')).rejects.toMatchObject({
+      message: 'unauthorized',
+      isUnauthorized: true,
+    })
   })
 })

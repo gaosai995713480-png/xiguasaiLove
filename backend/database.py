@@ -4,12 +4,37 @@
 """
 import pymysql
 import logging
+import secrets
 from contextlib import contextmanager
+from pathlib import Path
 from .config import settings
 
 logger = logging.getLogger(__name__)
 
 _TABLE_INIT_DONE = False
+_SESSION_TABLE_READY = False
+
+# 仅用于识别历史上已经写入数据库的固定初始值，并在启动时安全轮换。
+_LEGACY_DEFAULT_ADMIN_PASSWORD = "201220"
+_LEGACY_DEFAULT_GALLERY_PASSWORD = "201220"
+_LEGACY_DEFAULT_INVITE_CODE = "love2023"
+
+
+def _write_initial_credentials(credentials: dict[str, str]) -> Path:
+    """把自动生成的初始化凭据写到受限文件，避免明文写入日志。"""
+    target = settings.base_dir / "tmp" / "initial_credentials.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# 首次初始化或安全轮换自动生成的凭据",
+        "# 请登录后修改，并删除此文件",
+    ]
+    lines.extend(f"{key}={value}" for key, value in credentials.items())
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        target.chmod(0o600)
+    except OSError:
+        logger.warning("无法设置初始化凭据文件权限: %s", target)
+    return target
 
 
 def _get_connection() -> pymysql.connections.Connection:
@@ -21,6 +46,39 @@ def _get_connection() -> pymysql.connections.Connection:
         database=settings.db_name,
         charset="utf8mb4",
     )
+
+
+def ensure_session_table() -> None:
+    """确保会话表存在。
+
+    TestClient 等场景可能不触发 FastAPI startup，因此登录创建会话时
+    也需要一个幂等的建表入口。
+    """
+    global _SESSION_TABLE_READY
+    if _SESSION_TABLE_READY:
+        return
+
+    conn = _get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS `{settings.sessions_table}` (
+                    token_hash CHAR(64) PRIMARY KEY COMMENT '会话 token 的 SHA-256',
+                    username VARCHAR(50) NOT NULL COMMENT '所属用户名',
+                    role VARCHAR(20) NOT NULL COMMENT '登录时角色',
+                    gallery_unlocked TINYINT NOT NULL DEFAULT 0 COMMENT '画廊是否已解锁',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                    expires_at DATETIME NOT NULL COMMENT '服务端过期时间',
+                    INDEX idx_sessions_username (username),
+                    INDEX idx_sessions_expires (expires_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='登录会话表'
+                """
+            )
+        conn.commit()
+        _SESSION_TABLE_READY = True
+    finally:
+        conn.close()
 
 
 @contextmanager
@@ -65,7 +123,7 @@ def _has_column(conn, table: str, column: str) -> bool:
 
 def init_tables():
     """初始化所有数据表"""
-    global _TABLE_INIT_DONE
+    global _TABLE_INIT_DONE, _SESSION_TABLE_READY
     if _TABLE_INIT_DONE:
         return
 
@@ -211,6 +269,18 @@ def init_tables():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '注册时间',
                     last_login_at TIMESTAMP NULL DEFAULT NULL COMMENT '最后登录时间'
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表'
+            """,
+            settings.sessions_table: f"""
+                CREATE TABLE IF NOT EXISTS `{settings.sessions_table}` (
+                    token_hash CHAR(64) PRIMARY KEY COMMENT '会话 token 的 SHA-256',
+                    username VARCHAR(50) NOT NULL COMMENT '所属用户名',
+                    role VARCHAR(20) NOT NULL COMMENT '登录时角色',
+                    gallery_unlocked TINYINT NOT NULL DEFAULT 0 COMMENT '画廊是否已解锁',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                    expires_at DATETIME NOT NULL COMMENT '服务端过期时间',
+                    INDEX idx_sessions_username (username),
+                    INDEX idx_sessions_expires (expires_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='登录会话表'
             """,
             "ai_skill_presets": """
                 CREATE TABLE IF NOT EXISTS `ai_skill_presets` (
@@ -417,29 +487,86 @@ def init_tables():
                     f"ALTER TABLE `{settings.users_table}` ADD COLUMN last_login_at TIMESTAMP NULL DEFAULT NULL COMMENT '最后登录时间'"
                 )
 
+        # 首次初始化凭据：优先使用环境变量；未配置时生成随机值并写入受限文件。
+        # 已存在的记录不会被覆盖；仅对历史固定默认值做一次安全轮换。
+        initial_admin_username = (settings.initial_admin_username or "admin").strip()
+        admin_password_from_env = settings.initial_admin_password.strip()
+        gallery_password_from_env = settings.initial_gallery_password.strip()
+        invite_code_from_env = settings.initial_invite_code.strip()
+        generated_credentials: dict[str, str] = {}
+
+        def _ensure_secret(env_value: str, key: str, generator) -> str:
+            if env_value:
+                return env_value
+            if key not in generated_credentials:
+                generated_credentials[key] = generator()
+            return generated_credentials[key]
+
         # 确保画廊默认密码
         with conn.cursor() as cursor:
             cursor.execute(
-                f"SELECT COUNT(*) FROM `{settings.page_password_table}` WHERE page_key = 'gallery'"
+                f"SELECT password FROM `{settings.page_password_table}` WHERE page_key = 'gallery'"
             )
-            if cursor.fetchone()[0] == 0:
+            gallery_row = cursor.fetchone()
+            initial_gallery_password = (
+                _ensure_secret(
+                    gallery_password_from_env,
+                    "INITIAL_GALLERY_PASSWORD",
+                    lambda: secrets.token_urlsafe(18),
+                )
+                if not gallery_row or gallery_row[0] == _LEGACY_DEFAULT_GALLERY_PASSWORD
+                else ""
+            )
+            if not gallery_row:
                 cursor.execute(
                     f"INSERT INTO `{settings.page_password_table}` (page_key, password) VALUES (%s, %s)",
-                    ("gallery", "201220"),
+                    ("gallery", initial_gallery_password),
                 )
+            elif gallery_row[0] == _LEGACY_DEFAULT_GALLERY_PASSWORD:
+                cursor.execute(
+                    f"UPDATE `{settings.page_password_table}` SET password = %s WHERE page_key = 'gallery'",
+                    (initial_gallery_password,),
+                )
+                logger.warning("已轮换历史固定画廊密码，请查看环境变量或 tmp/initial_credentials.txt")
 
         # 确保默认 admin 用户
         with conn.cursor() as cursor:
             cursor.execute(f"SELECT COUNT(*) FROM `{settings.users_table}`")
-            if cursor.fetchone()[0] == 0:
+            user_count = cursor.fetchone()[0]
+            initial_admin_password = (
+                _ensure_secret(
+                    admin_password_from_env,
+                    "INITIAL_ADMIN_PASSWORD",
+                    lambda: secrets.token_urlsafe(18),
+                )
+                if user_count == 0
+                else ""
+            )
+            if user_count == 0:
                 cursor.execute(
                     f"INSERT INTO `{settings.users_table}` (username, password, role) VALUES (%s, %s, %s)",
-                    ("admin", "201220", "admin"),
+                    (initial_admin_username, initial_admin_password, "admin"),
                 )
+            else:
+                cursor.execute(
+                    f"SELECT id, password FROM `{settings.users_table}` "
+                    "WHERE role = 'admin' ORDER BY id LIMIT 1"
+                )
+                admin_row = cursor.fetchone()
+                if admin_row and admin_row[1] == _LEGACY_DEFAULT_ADMIN_PASSWORD:
+                    initial_admin_password = _ensure_secret(
+                        admin_password_from_env,
+                        "INITIAL_ADMIN_PASSWORD",
+                        lambda: secrets.token_urlsafe(18),
+                    )
+                    cursor.execute(
+                        f"UPDATE `{settings.users_table}` SET password = %s WHERE id = %s",
+                        (initial_admin_password, admin_row[0]),
+                    )
+                    logger.warning("已轮换历史固定管理员密码，请查看环境变量或 tmp/initial_credentials.txt")
 
         # 确保默认邀请码及 OSS 配置项
         default_configs = [
-            ("INVITE_CODE", "love2023"),
             ("OSS_ENDPOINT", ""),
             ("OSS_BUCKET_NAME", ""),
             ("OSS_ACCESS_KEY_ID", ""),
@@ -463,6 +590,28 @@ def init_tables():
             ("VITE_TRIPSTAR_AMAP_SECURITY_JS_CODE", ""),
         ]
         with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT config_value FROM love_config WHERE config_key = 'INVITE_CODE'"
+            )
+            invite_row = cursor.fetchone()
+            if not invite_row or invite_row[0] == _LEGACY_DEFAULT_INVITE_CODE:
+                initial_invite_code = _ensure_secret(
+                    invite_code_from_env,
+                    "INITIAL_INVITE_CODE",
+                    lambda: secrets.token_urlsafe(12),
+                )
+                if invite_row:
+                    cursor.execute(
+                        "UPDATE love_config SET config_value = %s WHERE config_key = 'INVITE_CODE'",
+                        (initial_invite_code,),
+                    )
+                    logger.warning("已轮换历史固定邀请码，请查看环境变量或 tmp/initial_credentials.txt")
+                else:
+                    cursor.execute(
+                        "INSERT INTO love_config (config_key, config_value) VALUES (%s, %s)",
+                        ("INVITE_CODE", initial_invite_code),
+                    )
+
             for k, v in default_configs:
                 cursor.execute("SELECT COUNT(*) FROM love_config WHERE config_key = %s", (k,))
                 if cursor.fetchone()[0] == 0:
@@ -476,6 +625,10 @@ def init_tables():
 
         conn.commit()
         _TABLE_INIT_DONE = True
+        _SESSION_TABLE_READY = True
+        if generated_credentials:
+            credential_file = _write_initial_credentials(generated_credentials)
+            logger.warning("首次初始化凭据已写入受限文件: %s", credential_file)
         logger.info("所有数据表初始化完成")
     except Exception as e:
         logger.warning("数据库初始化失败: %s", e)
@@ -526,6 +679,7 @@ def get_config(key: str) -> str:
                 row = cursor.fetchone()
                 return row[0] if row and row[0] else ""
     except Exception:
+        logger.warning("读取配置失败: %s", key, exc_info=True)
         return ""
 
 
@@ -539,6 +693,7 @@ def get_all_cookies() -> dict:
                 )
                 return {r[0]: r[1] for r in cursor.fetchall() if r[1]}
     except Exception:
+        logger.warning("读取 Cookie 配置失败", exc_info=True)
         return {}
 
 
@@ -552,6 +707,7 @@ def get_all_configs() -> dict:
                 )
                 return {r[0]: r[1] or "" for r in cursor.fetchall()}
     except Exception:
+        logger.warning("读取全部配置失败", exc_info=True)
         return {}
 
 
@@ -580,6 +736,9 @@ def verify_page_password(page_key: str, password: str) -> bool:
                 row = cursor.fetchone()
                 if not row:
                     return False
-                return hmac.compare_digest(password, row[0])
+                return hmac.compare_digest(
+                    str(password).encode("utf-8"),
+                    str(row[0]).encode("utf-8"),
+                )
     except Exception:
         return False

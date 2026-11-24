@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import traceback
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, WebSocket
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, WebSocket
+from starlette.concurrency import run_in_threadpool
 
+from ..dependencies import SESSION_COOKIE_NAME, UserInfo, get_current_user, get_user_from_token
 from .config import get_tripstar_settings
 from .models.schemas import TripStarRequest, TripStarRouteRequest, TripStarSubmitResponse
 from .planner import TripStarPlanner
@@ -30,10 +33,27 @@ _PLACEHOLDER_CONFIG_VALUES = {
 
 def _new_store() -> TripStarTaskStore:
     settings = get_tripstar_settings()
-    return TripStarTaskStore(settings.task_dir)
+    stale_after = max(45 * 60, int(settings.llm_timeout) * 2 + 5 * 60)
+    return TripStarTaskStore(settings.task_dir, stale_after_seconds=stale_after)
 
 
 _store = _new_store()
+
+
+def _require_user(request: Request) -> UserInfo:
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    return user
+
+
+def _can_view_task(user: UserInfo, task: dict, include_all: bool = False) -> bool:
+    return task.get("owner") == user.username or (include_all and user.role == "admin")
+
+
+def _websocket_timeout_seconds(settings) -> float:
+    # LLM 失败会重试一次，并可能在之后继续做 POI/路线请求。
+    return max(300.0, float(settings.llm_timeout) * 2 + 120.0)
 
 
 def _is_placeholder_config(value: str) -> bool:
@@ -49,6 +69,7 @@ def _serialize_task(task: dict) -> dict:
     return {
         "task_id": task.get("task_id"),
         "plan_id": task.get("plan_id", task.get("task_id")),
+        "owner": task.get("owner", ""),
         "status": task.get("status", "processing"),
         "stage": task.get("stage", ""),
         "progress": task.get("progress", 0),
@@ -60,10 +81,6 @@ def _serialize_task(task: dict) -> dict:
 
 
 def _run_task(task_id: str, request_payload: dict) -> None:
-    settings = get_tripstar_settings()
-    planner = TripStarPlanner(settings)
-    request = TripStarRequest(**request_payload)
-
     def progress(stage: str, message: str, value: int) -> None:
         _store.update(
             task_id,
@@ -74,6 +91,9 @@ def _run_task(task_id: str, request_payload: dict) -> None:
         )
 
     try:
+        settings = get_tripstar_settings()
+        planner = TripStarPlanner(settings)
+        request = TripStarRequest(**request_payload)
         result = planner.plan(request, progress)
         _store.update(
             task_id,
@@ -117,7 +137,7 @@ def health_check():
 
 
 @router.get("/map/config", summary="获取 TripStar 前端地图配置")
-def get_map_config():
+def get_map_config(_user: UserInfo = Depends(_require_user)):
     settings = get_tripstar_settings()
     amap_web_js_key = _usable_config_value(settings.amap_web_js_key)
     amap_security_js_code = _usable_config_value(settings.amap_security_js_code)
@@ -161,7 +181,7 @@ def _xhs_service() -> XhsService:
 
 
 @router.get("/xhs/status", summary="TripStar 小红书配置状态")
-def get_xhs_status():
+def get_xhs_status(_user: UserInfo = Depends(_require_user)):
     settings = get_tripstar_settings()
     cookie_length = len(settings.xhs_cookie or "")
     return {
@@ -177,6 +197,7 @@ def search_xhs_notes(
     city: str = Query(..., min_length=1, max_length=80),
     keyword: str = Query("", max_length=120),
     limit: int = Query(6, ge=1, le=20),
+    _user: UserInfo = Depends(_require_user),
 ):
     query = f"{city} {keyword}".strip()
     try:
@@ -199,6 +220,7 @@ def search_xhs_notes(
 def geocode_location(
     city: str = Query(..., min_length=1, max_length=80),
     keyword: str = Query(..., min_length=1, max_length=120),
+    _user: UserInfo = Depends(_require_user),
 ):
     try:
         item = _amap_service().geocode(city, keyword)
@@ -212,6 +234,7 @@ def search_poi(
     city: str = Query(..., min_length=1, max_length=80),
     keyword: str = Query(..., min_length=1, max_length=120),
     limit: int = Query(10, ge=1, le=25),
+    _user: UserInfo = Depends(_require_user),
 ):
     try:
         items = _amap_service().search_poi(city, keyword, limit)
@@ -221,7 +244,10 @@ def search_poi(
 
 
 @router.post("/map/route", summary="TripStar 高德多点路线规划")
-def plan_route(request: TripStarRouteRequest):
+def plan_route(
+    request: TripStarRouteRequest,
+    _user: UserInfo = Depends(_require_user),
+):
     try:
         route_data = _amap_service().route_many(
             [point.model_dump() for point in request.points],
@@ -233,14 +259,18 @@ def plan_route(request: TripStarRouteRequest):
 
 
 @router.post("/plan", response_model=TripStarSubmitResponse, summary="提交 TripStar 旅行规划任务")
-def create_plan(request: TripStarRequest, background_tasks: BackgroundTasks):
+def create_plan(
+    request: TripStarRequest,
+    background_tasks: BackgroundTasks,
+    user: UserInfo = Depends(_require_user),
+):
     settings = get_tripstar_settings()
     if not settings.enabled:
         raise HTTPException(status_code=503, detail="TripStar 模块未启用")
 
     task_id = uuid.uuid4().hex[:8]
     request_payload = request.model_dump(mode="json")
-    _store.create(task_id, request_payload)
+    _store.create(task_id, request_payload, owner=user.username)
     background_tasks.add_task(_run_task, task_id, request_payload)
 
     return TripStarSubmitResponse(
@@ -253,9 +283,15 @@ def create_plan(request: TripStarRequest, background_tasks: BackgroundTasks):
 
 
 @router.get("/status/{task_id}", summary="查询 TripStar 任务状态")
-def get_status(task_id: str):
+def get_status(
+    task_id: str,
+    include_all: bool = Query(False, alias="all"),
+    user: UserInfo = Depends(_require_user),
+):
     task = _store.get(task_id)
     if task is None:
+        raise HTTPException(status_code=404, detail="TripStar 任务不存在")
+    if not _can_view_task(user, task, include_all=include_all):
         raise HTTPException(status_code=404, detail="TripStar 任务不存在")
     return _serialize_task(task)
 
@@ -263,6 +299,13 @@ def get_status(task_id: str):
 @router.websocket("/ws/{task_id}")
 async def websocket_status(websocket: WebSocket, task_id: str):
     await websocket.accept()
+    token = websocket.cookies.get(SESSION_COOKIE_NAME, "")
+    user = await run_in_threadpool(get_user_from_token, token)
+    if not user:
+        await websocket.close(code=1008)
+        return
+
+    include_all = str(websocket.query_params.get("all", "")).lower() in {"1", "true", "yes"}
     task = _store.get(task_id)
     if task is None:
         await websocket.send_json(
@@ -278,8 +321,13 @@ async def websocket_status(websocket: WebSocket, task_id: str):
         )
         await websocket.close()
         return
+    if not _can_view_task(user, task, include_all=include_all):
+        await websocket.close(code=1008)
+        return
 
-    for _ in range(300):
+    settings = await run_in_threadpool(get_tripstar_settings)
+    deadline = time.monotonic() + _websocket_timeout_seconds(settings)
+    while time.monotonic() < deadline:
         snapshot = _serialize_task(task)
         await websocket.send_json(snapshot)
         if snapshot["status"] in {"completed", "failed"}:
@@ -301,17 +349,21 @@ async def websocket_status(websocket: WebSocket, task_id: str):
     await websocket.send_json(
         {
             **_serialize_task(task),
-            "status": "failed",
-            "stage": "timeout",
-            "progress": 100,
-            "message": "TripStar 任务等待超时，请通过轮询接口确认或重新提交。",
-            "error": "TripStar 任务等待超时",
+            "stage": "ws_timeout",
+            "message": "WebSocket 等待超时，任务仍在处理中，请继续轮询状态接口。",
         }
     )
     await websocket.close()
 
 
 @router.get("/history", summary="查询 TripStar 历史计划")
-def get_history(limit: int = 10):
+def get_history(
+    limit: int = 10,
+    include_all: bool = Query(False, alias="all"),
+    user: UserInfo = Depends(_require_user),
+):
+    if include_all and user.role != "admin":
+        raise HTTPException(status_code=403, detail="权限不足")
     safe_limit = max(1, min(int(limit or 10), 50))
-    return {"items": _store.recent_completed(safe_limit)}
+    owner = None if include_all else user.username
+    return {"items": _store.recent_completed(safe_limit, owner=owner)}

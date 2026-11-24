@@ -89,6 +89,38 @@ def upload_to_oss(safe_name: str, file_data: bytes, prefix: str = "photos") -> b
         return False
 
 
+def upload_to_oss_exclusive(
+    safe_name: str,
+    file_data: bytes,
+    prefix: str = "photos",
+) -> str:
+    """上传一个此前不应存在的对象。
+
+    返回 "ok" / "exists" / "error"。使用 OSS 的 forbid-overwrite 头，
+    避免并发请求把已有照片静默覆盖。
+    """
+    bucket = get_oss_bucket()
+    if not bucket:
+        logger.warning("OSS not configured, cannot upload file.")
+        return "error"
+
+    object_key = f"{prefix}/{safe_name}"
+    try:
+        bucket.put_object(
+            object_key,
+            file_data,
+            headers={"x-oss-forbid-overwrite": "true"},
+        )
+        return "ok"
+    except Exception as e:
+        status = getattr(e, "status", None)
+        code = str(getattr(e, "code", "") or "")
+        if status == 409 or code in {"FileAlreadyExists", "ObjectAlreadyExists"}:
+            return "exists"
+        logger.error(f"OSS exclusive put_object failed: {e}")
+        return "error"
+
+
 def delete_from_oss(object_key: str) -> bool:
     """删除 OSS 对象"""
     bucket = get_oss_bucket()

@@ -49,6 +49,23 @@ def get_howtocook_recipe_count(get_db_factory: Callable = get_db) -> int:
     return int(row[0] if row else 0)
 
 
+def get_last_howtocook_import_status(get_db_factory: Callable = get_db) -> str:
+    """返回最近一次 HowToCook 导入批次状态；没有批次时返回空字符串。"""
+    with get_db_factory() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT status FROM `love_recipe_import_batches`
+                WHERE source = %s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                ("howtocook",),
+            )
+            row = cursor.fetchone()
+    return str(row[0]) if row and row[0] else ""
+
+
 def iter_howtocook_markdown_files(source_dir: Path, limit: int | None = None):
     """遍历 HowToCook 快照 dishes 目录中的 Markdown 文件。"""
     dishes_dir = source_dir / "dishes"
@@ -141,12 +158,15 @@ def ensure_howtocook_recipes_seeded(
     try:
         existing_count = get_howtocook_recipe_count(get_db_factory=get_db_factory)
         if existing_count > 0 and not force:
-            return RecipeBootstrapResult(
-                status="already_seeded",
-                seeded=False,
-                existing_count=existing_count,
-                source_dir=str(resolved_source_dir),
-            )
+            last_status = get_last_howtocook_import_status(get_db_factory=get_db_factory)
+            # 上一次导入只有部分成功时，不能因为库里已经有任意菜谱就永久跳过。
+            if last_status not in {"partial", "failed"}:
+                return RecipeBootstrapResult(
+                    status="already_seeded",
+                    seeded=False,
+                    existing_count=existing_count,
+                    source_dir=str(resolved_source_dir),
+                )
 
         recipes, load_errors, resolved_commit = load_howtocook_recipes(
             resolved_source_dir,
@@ -174,13 +194,17 @@ def ensure_howtocook_recipes_seeded(
             created_by=created_by,
             force=force,
         )
-        if import_result.status == "failed":
-            message = "HowToCook 菜谱导入失败"
+        if import_result.status in {"failed", "partial"}:
+            message = (
+                "HowToCook 菜谱导入失败"
+                if import_result.status == "failed"
+                else "HowToCook 菜谱仅部分导入，需重试"
+            )
             if raise_on_error:
                 raise RuntimeError(message)
             logger.warning("%s: %s", message, import_result.errors)
             return RecipeBootstrapResult(
-                status="failed",
+                status=import_result.status,
                 seeded=False,
                 existing_count=existing_count,
                 source_dir=str(resolved_source_dir),

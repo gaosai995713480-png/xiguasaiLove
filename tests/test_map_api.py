@@ -3,7 +3,9 @@
 """
 import os
 import sys
+import time
 from contextlib import contextmanager
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
@@ -14,8 +16,10 @@ from backend.config import settings
 from backend.dependencies import (
     SESSION_COOKIE_NAME,
     UserInfo,
+    _cache_session,
+    _session_expiries,
     _sessions,
-    create_session,
+    _sessions_lock,
 )
 from backend.routers import map as map_router
 
@@ -24,25 +28,53 @@ client = TestClient(app)
 
 
 class FakeCursor:
-    def __init__(self, exists: bool, update_rowcount: int):
+    def __init__(
+        self,
+        exists: bool,
+        update_rowcount: int,
+        *,
+        cover_url: str = "",
+        photo_urls: tuple[str, ...] = (),
+        referenced_urls: tuple[str, ...] = (),
+    ):
         self.exists = exists
         self.update_rowcount = update_rowcount
+        self.cover_url = cover_url
+        self.photo_urls = photo_urls
+        self.referenced_urls = referenced_urls
         self.executed = []
         self.rowcount = 0
+        self.lastrowid = 42
         self._fetchone = None
+        self._fetchall = []
 
     def execute(self, sql, params=None):
         self.executed.append((sql, params))
         normalized = " ".join(str(sql).split())
+        if " UNION " in normalized:
+            self._fetchall = [(url,) for url in self.referenced_urls]
+            return
         if normalized.startswith(f"SELECT 1 FROM `{settings.map_table}`"):
             self._fetchone = (1,) if self.exists else None
+            return
+        if normalized.startswith(f"SELECT photo_url FROM `{settings.map_table}`"):
+            self._fetchone = (self.cover_url,) if self.cover_url else None
+            return
+        if normalized.startswith(f"SELECT photo_url FROM `{settings.map_photos_table}`"):
+            self._fetchall = [(url,) for url in self.photo_urls]
             return
         if normalized.startswith(f"UPDATE `{settings.map_table}`"):
             self.rowcount = self.update_rowcount
             return
+        if normalized.startswith(f"INSERT INTO `{settings.map_table}`"):
+            self.lastrowid = 42
+            return
 
     def fetchone(self):
         return self._fetchone
+
+    def fetchall(self):
+        return self._fetchall
 
     def __enter__(self):
         return self
@@ -64,7 +96,12 @@ class FakeConnection:
 
 
 def login_as_admin():
-    token = create_session(UserInfo(username="admin_user", role="admin"))
+    token = f"map-{uuid4().hex}"
+    _cache_session(
+        token,
+        UserInfo(username="admin_user", role="admin"),
+        time.time() + 3600,
+    )
     client.cookies.set(SESSION_COOKIE_NAME, token)
 
 
@@ -75,7 +112,9 @@ def fake_get_db(connection: FakeConnection):
 
 def setup_function():
     client.cookies.clear()
-    _sessions.clear()
+    with _sessions_lock:
+        _sessions.clear()
+        _session_expiries.clear()
 
 
 def test_update_missing_marker_returns_404_without_touching_photo_rows(monkeypatch):
@@ -131,3 +170,100 @@ def test_update_existing_marker_with_unchanged_values_still_succeeds(monkeypatch
     assert any(sql.startswith("DELETE FROM") for sql in photo_sqls)
     assert any(sql.startswith("INSERT INTO") for sql in photo_sqls)
     assert connection.commit_called is True
+
+
+def test_create_marker_accepts_zero_latitude_or_longitude(monkeypatch):
+    for body in (
+        {"title": "赤道", "lat": 0, "lng": 120, "visit_date": "2026-04-16"},
+        {"title": "本初子午线", "lat": 30, "lng": 0, "visit_date": "2026-04-16"},
+    ):
+        cursor = FakeCursor(exists=True, update_rowcount=1)
+        connection = FakeConnection(cursor)
+        monkeypatch.setattr(map_router, "get_db", lambda: fake_get_db(connection))
+        login_as_admin()
+
+        response = client.post("/api/map", json=body)
+
+        assert response.status_code == 200
+        assert response.json()["id"] == 42
+        assert connection.commit_called is True
+
+
+def test_create_marker_rejects_out_of_range_coordinates(monkeypatch):
+    login_as_admin()
+    response = client.post(
+        "/api/map",
+        json={"title": "无效", "lat": 91, "lng": 120},
+    )
+
+    assert response.status_code == 400
+
+
+def test_delete_marker_cleans_only_unreferenced_map_media(monkeypatch):
+    login_as_admin()
+    cursor = FakeCursor(
+        exists=True,
+        update_rowcount=1,
+        cover_url="https://cdn.example/map/cover.jpg",
+        photo_urls=(
+            "https://cdn.example/map/shared.jpg",
+            "https://cdn.example/map/removed.jpg",
+            "https://external.example/map/external.jpg",
+        ),
+        referenced_urls=("https://cdn.example/map/shared.jpg",),
+    )
+    connection = FakeConnection(cursor)
+    deleted_keys = []
+    monkeypatch.setattr(map_router, "get_db", lambda: fake_get_db(connection))
+    monkeypatch.setattr(map_router, "get_oss_bucket", lambda: object())
+    monkeypatch.setattr(map_router, "get_oss_domain", lambda: "https://cdn.example")
+    monkeypatch.setattr(
+        map_router,
+        "delete_from_oss",
+        lambda key: deleted_keys.append(key) or True,
+    )
+
+    response = client.delete("/api/map?id=1")
+
+    assert response.status_code == 200
+    assert sorted(deleted_keys) == ["map/cover.jpg", "map/removed.jpg"]
+
+
+def test_update_marker_cleans_only_removed_unreferenced_media(monkeypatch):
+    login_as_admin()
+    cursor = FakeCursor(
+        exists=True,
+        update_rowcount=1,
+        cover_url="https://cdn.example/map/cover.jpg",
+        photo_urls=(
+            "https://cdn.example/map/shared.jpg",
+            "https://cdn.example/map/removed.jpg",
+        ),
+        referenced_urls=("https://cdn.example/map/shared.jpg",),
+    )
+    connection = FakeConnection(cursor)
+    deleted_keys = []
+    monkeypatch.setattr(map_router, "get_db", lambda: fake_get_db(connection))
+    monkeypatch.setattr(map_router, "get_oss_bucket", lambda: object())
+    monkeypatch.setattr(map_router, "get_oss_domain", lambda: "https://cdn.example")
+    monkeypatch.setattr(
+        map_router,
+        "delete_from_oss",
+        lambda key: deleted_keys.append(key) or True,
+    )
+
+    response = client.put(
+        "/api/map",
+        json={
+            "id": 1,
+            "title": "更新后的地点",
+            "note": "",
+            "visit_date": "2026-04-16",
+            "photos": ["https://cdn.example/map/shared.jpg"],
+            "lat": 30.6,
+            "lng": 114.3,
+        },
+    )
+
+    assert response.status_code == 200
+    assert sorted(deleted_keys) == ["map/cover.jpg", "map/removed.jpg"]

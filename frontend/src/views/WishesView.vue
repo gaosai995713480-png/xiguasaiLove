@@ -9,6 +9,7 @@ const wishes = ref([])
 const modalVisible = ref(false)
 const modalPos = ref({ left: '0', top: '0' })
 const wishInput = ref('')
+const submitting = ref(false)
 let pendingPos = null
 
 function createBackgroundStars() {
@@ -35,6 +36,7 @@ function spawnShootingStar() {
 }
 
 function onSkyClick(e) {
+  if (submitting.value) return
   if (e.target.closest('.star') || e.target.closest('.top-bar')) return
   pendingPos = {
     x: e.clientX / window.innerWidth,
@@ -55,22 +57,27 @@ function onSkyClick(e) {
 
 async function submitWish() {
   const content = wishInput.value.trim()
-  if (!content || !pendingPos) return
+  const position = pendingPos
+  if (!content || !position || submitting.value) return
   const colors = ['#ffd700', '#ff6b9d', '#a78bfa', '#60a5fa', '#34d399', '#f472b6']
   const color = colors[Math.floor(Math.random() * colors.length)]
+  submitting.value = true
   try {
-    const data = await wishApi.create({ content, x: pendingPos.x, y: pendingPos.y, color })
+    const data = await wishApi.create({ content, x: position.x, y: position.y, color })
     if (data.ok) {
-      wishes.value.push({ id: data.id, content, x: pendingPos.x, y: pendingPos.y, color })
+      wishes.value.push({ id: data.id, content, x: position.x, y: position.y, color })
+      modalVisible.value = false
+      if (pendingPos === position) pendingPos = null
     }
   } catch { /* ignore */ }
-  modalVisible.value = false
-  pendingPos = null
+  finally {
+    submitting.value = false
+  }
 }
 
 function onInputKeydown(e) {
-  if (e.key === 'Enter') submitWish()
-  if (e.key === 'Escape') modalVisible.value = false
+  if (e.key === 'Enter' && !submitting.value) submitWish()
+  if (e.key === 'Escape' && !submitting.value) modalVisible.value = false
 }
 
 async function loadWishes() {
@@ -122,9 +129,10 @@ onUnmounted(() => {
       type="text"
       placeholder="写下你的心愿..."
       maxlength="50"
+      :disabled="submitting"
       @keydown="onInputKeydown"
     />
-    <button @click="submitWish">许愿 ⭐</button>
+    <button :disabled="submitting" @click="submitWish">{{ submitting ? '正在许愿...' : '许愿 ⭐' }}</button>
   </div>
 </template>
 

@@ -2,7 +2,9 @@
 快递查询接口回归测试
 """
 import os
+import secrets
 import sys
+import time
 import unittest
 
 from fastapi.testclient import TestClient
@@ -14,7 +16,7 @@ from backend.dependencies import (
     SESSION_COOKIE_NAME,
     UserInfo,
     _sessions,
-    create_session,
+    _cache_session,
 )
 
 
@@ -27,7 +29,12 @@ class ExpressApiTestCase(unittest.TestCase):
         _sessions.clear()
 
     def login_as_admin(self):
-        token = create_session(UserInfo(username="admin_user", role="admin"))
+        token = secrets.token_urlsafe(16)
+        _cache_session(
+            token,
+            UserInfo(username="admin_user", role="admin"),
+            time.time() + 3600,
+        )
         client.cookies.set(SESSION_COOKIE_NAME, token)
 
     def test_update_config_rejects_none_value_without_server_error(self):

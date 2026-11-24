@@ -4,10 +4,11 @@ FastAPI 应用入口
 import argparse
 import logging
 import webbrowser
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
@@ -32,13 +33,23 @@ app = FastAPI(title="xiguasaiLove", docs_url="/docs/api")
 # GZip 压缩 (对超过 1KB 的响应进行压缩传输)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS：默认只允许同源。需要跨域开发时通过 CORS_ORIGINS 显式列出。
+_cors_origins = [
+    origin.strip()
+    for origin in (settings.cors_origins or "").split(",")
+    if origin.strip()
+]
+if "*" in _cors_origins:
+    logger.warning("CORS_ORIGINS 包含 *，为避免暴露带凭据的跨域访问，已忽略该配置")
+    _cors_origins = []
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
 # 注册路由
 app.include_router(auth.router)
@@ -93,24 +104,59 @@ def startup():
         logger.warning("数据库初始化失败（部分功能可能不可用）: %s", e)
 
 
-# 静态文件（assets 等）
-app.mount("/assets", StaticFiles(directory=str(settings.web_dir / "assets")), name="assets")
+# 静态文件（assets 等）。干净克隆可能还没有前端构建产物，
+# 因此不能因为 docs/assets 缺失而在 import 阶段启动失败。
+app.mount(
+    "/assets",
+    StaticFiles(directory=str(settings.web_dir / "assets"), check_dir=False),
+    name="assets",
+)
+
+
+_PUBLIC_WEB_FILES = {"index.html", "favicon.svg", "icons.svg", "ai-icon.png"}
+
+
+def _safe_web_file(path: str) -> Path | None:
+    """把请求路径限制在 docs 目录内，阻止 SPA fallback 目录穿越。"""
+    if not path or "\x00" in path:
+        return None
+    try:
+        root = settings.web_dir.resolve()
+        candidate = (root / path).resolve()
+        candidate.relative_to(root)
+    except (ValueError, OSError):
+        return None
+    # 本地相册和本地音乐由各自的鉴权接口提供，不能被 SPA fallback 直出。
+    for private_dir in (settings.photos_dir, settings.music_dir):
+        try:
+            candidate.relative_to(private_dir.resolve())
+            return None
+        except ValueError:
+            pass
+    # docs 下只开放 Vite 公共入口文件；其他任意文件不应通过 fallback 暴露。
+    if candidate.name not in _PUBLIC_WEB_FILES:
+        return None
+    return candidate if candidate.is_file() else None
 
 
 # SPA fallback: 所有非 API/静态资源路由返回 index.html
 @app.get("/{path:path}")
 async def spa_fallback(request: Request, path: str = ""):
-    # 已被 API 路由匹配的不会到这里
-    # 有文件扩展名的尝试作为静态文件
-    if "." in path.rsplit("/", 1)[-1]:
-        file = settings.web_dir / path
-        if file.exists():
-            return HTMLResponse(content=file.read_bytes(), media_type=_guess_type(path))
+    # API 路由的错误拼写不能被 SPA 首页伪装成 200。
+    if path in {"api", "auth", "photos"} or path.startswith(("api/", "auth/", "photos/")):
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    has_extension = "." in path.rsplit("/", 1)[-1]
+    if has_extension:
+        file = _safe_web_file(path)
+        if file is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(file, media_type=_guess_type(path))
 
     # SPA: 返回 index.html
-    index = settings.web_dir / "index.html"
-    if index.exists():
-        return HTMLResponse(content=index.read_text(encoding="utf-8"))
+    index = _safe_web_file("index.html")
+    if index is not None:
+        return FileResponse(index, media_type="text/html")
     return JSONResponse({"error": "index.html not found"}, status_code=404)
 
 

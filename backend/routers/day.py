@@ -260,7 +260,19 @@ def get_random_memory(request: Request, _=Depends(require_auth)):
 def set_memory_enabled(body: dict, _=Depends(require_role("admin"))):
     if "enabled" not in body:
         return _error("enabled is required", 400)
-    enabled = bool(body.get("enabled"))
+    raw_enabled = body.get("enabled")
+    if isinstance(raw_enabled, str):
+        normalized = raw_enabled.strip().lower()
+        if normalized in {"false", "0", "off", "no"}:
+            enabled = False
+        elif normalized in {"true", "1", "on", "yes"}:
+            enabled = True
+        else:
+            return _error("enabled must be a boolean", 400)
+    elif isinstance(raw_enabled, bool):
+        enabled = raw_enabled
+    else:
+        return _error("enabled must be a boolean", 400)
     set_config(MEMORY_CONFIG_KEY, "on" if enabled else "off")
     return {"enabled": enabled}
 

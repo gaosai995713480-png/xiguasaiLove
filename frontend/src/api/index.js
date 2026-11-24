@@ -8,19 +8,26 @@ import { useToast } from '../composables/useToast'
 
 const BASE = ''
 
+export async function fetchWithAuth(url, options = {}) {
+  const res = await fetch(`${BASE}${url}`, options)
+  if (res.status === 401) {
+    if (typeof window !== 'undefined') window.location.replace('/login')
+    const error = new Error('unauthorized')
+    error.isUnauthorized = true
+    throw error
+  }
+  return res
+}
+
 async function request(url, options = {}) {
   try {
-    const res = await fetch(`${BASE}${url}`, {
+    const res = await fetchWithAuth(url, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
         ...options.headers,
       },
     })
-    if (res.status === 401) {
-      window.location.replace('/login')
-      throw new Error('unauthorized')
-    }
     if (!res.ok) {
       // 尝试读取后端返回的具体错误信息
       const data = await res.clone().json().catch(() => ({}))
@@ -36,6 +43,7 @@ async function request(url, options = {}) {
       }
       const apiError = new Error(message)
       apiError.isApiError = true
+      apiError.status = res.status
       throw apiError
     }
     return res
@@ -79,10 +87,6 @@ async function readJsonSafe(res) {
 }
 
 async function handlePhotoResponse(res) {
-  if (res.status === 401) {
-    window.location.replace('/login')
-    throw new Error('unauthorized')
-  }
   const data = await readJsonSafe(res)
   if (res.status === 403) {
     const { error } = useToast()
@@ -102,7 +106,7 @@ async function handlePhotoResponse(res) {
 // 上传文件（非 JSON）
 async function uploadFile(url, file, fileName) {
   const data = await file.arrayBuffer()
-  const res = await fetch(`${BASE}${url}`, {
+  const res = await fetchWithAuth(url, {
     method: 'POST',
     headers: { 'X-File-Name': encodeURIComponent(fileName) },
     body: data,
@@ -215,13 +219,13 @@ export const bgmApi = {
 
 export const photoApi = {
   list: async () => {
-    const res = await fetch(`${BASE}/photos.json`)
+    const res = await fetchWithAuth('/photos.json')
     return handlePhotoResponse(res)
   },
   upload: (file, fileName) => uploadFile('/photos/upload-file', file, fileName),
   importZip: async (file) => {
     const data = await file.arrayBuffer()
-    const res = await fetch(`${BASE}/photos/import`, {
+    const res = await fetchWithAuth('/photos/import', {
       method: 'POST',
       body: data,
     })

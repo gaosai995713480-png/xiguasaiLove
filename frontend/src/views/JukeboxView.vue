@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import TopBar from '../components/TopBar.vue'
 import GlassModal from '../components/GlassModal.vue'
@@ -120,8 +120,6 @@ async function removeRequest(item) {
   } catch { /* ignore */ }
 }
 
-const isLoggedIn = computed(() => authStore.authenticated)
-
 onMounted(() => loadRequests())
 </script>
 
@@ -193,12 +191,12 @@ onMounted(() => loadRequests())
               </button>
               <span class="rc-adopted-badge" v-if="item.is_adopted">✅ 已采纳</span>
               <button
-                v-else-if="isLoggedIn"
+                v-else-if="authStore.isAdmin"
                 class="rc-adopt-btn"
                 @click="adoptRequest(item)"
               >📥 采纳</button>
               <button
-                v-if="isLoggedIn"
+                v-if="authStore.isAdmin"
                 class="rc-remove-btn"
                 @click="removeRequest(item)"
               >✕</button>

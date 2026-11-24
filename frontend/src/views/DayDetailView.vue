@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import TopBar from '../components/TopBar.vue'
 import { dayApi } from '../api'
@@ -17,6 +17,7 @@ const loading = ref(false)
 const errorMsg = ref('')
 const data = ref(null)
 const preview = ref(null)
+let loadRequestId = 0
 
 const valid = computed(() => isIsoDate(day.value))
 const title = computed(() => (valid.value ? formatDayTitle(day.value) : '这一天'))
@@ -31,23 +32,29 @@ const empty = computed(() => {
 })
 
 async function load() {
+  const requestId = ++loadRequestId
   preview.value = null
   data.value = null
   errorMsg.value = ''
+  loading.value = false
   if (!valid.value) {
     errorMsg.value = '日期不正确'
     contextStore.setPageState('日期不正确')
     return
   }
   loading.value = true
+  const requestedDay = day.value
   try {
-    data.value = await dayApi.get(day.value)
-    contextStore.setPageState(`正在查看 ${title.value}`)
+    const result = await dayApi.get(requestedDay)
+    if (requestId !== loadRequestId) return
+    data.value = result
+    contextStore.setPageState(`正在查看 ${formatDayTitle(requestedDay)}`)
   } catch (error) {
+    if (requestId !== loadRequestId) return
     errorMsg.value = error?.message || '加载失败'
     contextStore.setPageState(errorMsg.value)
   } finally {
-    loading.value = false
+    if (requestId === loadRequestId) loading.value = false
   }
 }
 
@@ -71,6 +78,10 @@ function moodLevelLabel(level) {
 }
 
 watch(day, load, { immediate: true })
+
+onUnmounted(() => {
+  loadRequestId += 1
+})
 </script>
 
 <template>

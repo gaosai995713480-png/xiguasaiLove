@@ -174,26 +174,31 @@ def collect_memories() -> dict:
                 cursor,
                 f"SELECT id, event_date, title, content, photo_url, icon FROM `{settings.timeline_table}` ORDER BY event_date ASC, id ASC",
                 ["id", "event_date", "title", "content", "photo_url", "icon"],
+                optional=False,
             )
             moods = _fetch(
                 cursor,
                 f"SELECT id, mood_date, emoji, note, level FROM `{settings.mood_table}` ORDER BY mood_date ASC",
                 ["id", "mood_date", "emoji", "note", "level"],
+                optional=False,
             )
             wishes = _fetch(
                 cursor,
                 f"SELECT id, content, x, y, color, created_at FROM `{settings.wish_table}` ORDER BY created_at ASC",
                 ["id", "content", "x", "y", "color", "created_at"],
+                optional=False,
             )
             capsules = _fetch(
                 cursor,
                 f"SELECT id, content, open_date, is_opened, created_at FROM `{settings.capsule_table}` ORDER BY open_date ASC, id ASC",
                 ["id", "content", "open_date", "is_opened", "created_at"],
+                optional=False,
             )
             markers = _fetch(
                 cursor,
                 f"SELECT id, title, note, photo_url, lat, lng, visit_date, created_at FROM `{settings.map_table}` ORDER BY visit_date ASC, id ASC",
                 ["id", "title", "note", "photo_url", "lat", "lng", "visit_date", "created_at"],
+                optional=False,
             )
             marker_photos = _fetch(
                 cursor,
@@ -206,16 +211,19 @@ def collect_memories() -> dict:
                     cursor,
                     f"SELECT marker_id, photo_url FROM `{settings.map_photos_table}` ORDER BY marker_id ASC, id ASC",
                     ["marker_id", "photo_url"],
+                    optional=False,
                 )
             photos = _fetch(
                 cursor,
                 "SELECT id, filename, oss_url, description, created_at FROM love_photos ORDER BY created_at ASC, id ASC",
                 ["id", "filename", "oss_url", "description", "created_at"],
+                optional=False,
             )
             playlist = _fetch(
                 cursor,
                 f"SELECT id, song_name, artist, netease_id, platform, sort_order FROM `{settings.music_table}` ORDER BY sort_order ASC, id ASC",
                 ["id", "song_name", "artist", "netease_id", "platform", "sort_order"],
+                optional=False,
             )
             cooking_records = _fetch(
                 cursor,
@@ -637,18 +645,18 @@ def _read_oss_bytes(item: dict, bucket) -> bytes | None:
         return None
 
 
-def _fetch(cursor, sql: str, fields: list[str], optional: bool = False) -> list[dict]:
+def _fetch(cursor, sql: str, fields: list[str], *, optional: bool) -> list[dict]:
     lowered = " ".join(sql.lower().split())
     if any(hint in lowered for hint in _SECRET_TABLE_HINTS):
         raise RuntimeError("backup refused to query secret table")
     try:
         cursor.execute(sql)
         rows = cursor.fetchall() or []
-    except Exception:
+    except Exception as exc:
         if optional:
+            logger.warning("备份可选查询失败: %s", " ".join(sql.split()), exc_info=True)
             return []
-        logger.warning("备份查询失败: %s", " ".join(sql.split()), exc_info=True)
-        return []
+        raise RuntimeError("备份必选数据查询失败") from exc
     result = []
     for row in rows:
         item = {}

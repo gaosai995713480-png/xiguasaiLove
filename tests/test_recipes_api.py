@@ -1,12 +1,14 @@
 import os
+import secrets
 import sys
+import time
 from contextlib import contextmanager
 
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from backend.dependencies import SESSION_COOKIE_NAME, UserInfo, _sessions, create_session
+from backend.dependencies import SESSION_COOKIE_NAME, UserInfo, _sessions, _cache_session
 from backend.main import app
 from backend.routers import recipes as recipes_router
 
@@ -28,6 +30,12 @@ class FakeCursor:
     def execute(self, sql, params=None):
         normalized = " ".join(str(sql).split())
         self.executed.append((normalized, params))
+        self._fetchone = None
+        self._fetchall = []
+        if normalized.startswith(
+            "SELECT is_favorite, want_to_cook, rating, note FROM `love_recipe_user_states`"
+        ):
+            return
         if normalized.startswith("SELECT id FROM `love_recipes` WHERE id = %s"):
             self._fetchone = (params[0],) if self.recipe_exists else None
             return
@@ -129,7 +137,8 @@ def fake_get_db(connection):
 
 
 def login_as_visitor():
-    token = create_session(UserInfo(username="lover", role="visitor"))
+    token = secrets.token_urlsafe(16)
+    _cache_session(token, UserInfo(username="lover", role="visitor"), time.time() + 3600)
     client.cookies.set(SESSION_COOKIE_NAME, token)
 
 

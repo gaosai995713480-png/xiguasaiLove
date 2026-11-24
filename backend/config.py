@@ -14,6 +14,23 @@ class Settings:
     host: str = os.getenv("LOVE_HOST", "127.0.0.1")
     port: int = int(os.getenv("LOVE_PORT", "0"))
 
+    # Web 安全
+    # 留空时只接受同源请求；多个来源用逗号分隔。
+    cors_origins: str = os.getenv("CORS_ORIGINS", "")
+    cookie_secure: bool = os.getenv("COOKIE_SECURE", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    session_ttl_seconds: int = int(os.getenv("SESSION_TTL_SECONDS", str(30 * 24 * 3600)))
+    trust_proxy_headers: bool = os.getenv("TRUST_PROXY_HEADERS", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+    # 首次建库时使用的初始凭据。未配置时生成随机值并写入服务日志。
+    initial_admin_username: str = os.getenv("INITIAL_ADMIN_USERNAME", "admin")
+    initial_admin_password: str = os.getenv("INITIAL_ADMIN_PASSWORD", "")
+    initial_gallery_password: str = os.getenv("INITIAL_GALLERY_PASSWORD", "")
+    initial_invite_code: str = os.getenv("INITIAL_INVITE_CODE", "")
+
     # MySQL
     db_host: str = os.getenv("DB_HOST", "127.0.0.1")
     db_port: int = int(os.getenv("DB_PORT", "3306"))
@@ -43,9 +60,13 @@ class Settings:
 
     # 用户表
     users_table: str = os.getenv("TABLE_USERS", "love_users")
+    sessions_table: str = os.getenv("TABLE_SESSIONS", "love_sessions")
 
-    # 高德 API
-    gaode_key: str = "c34bbce1d41994a5c7819ea44a0a004f"
+    # 高德 Web 服务 Key；另外兼容 TripStar 的 TRIPSTAR_AMAP_WEB_KEY。
+    gaode_key: str = (
+        os.getenv("AMAP_KEY", "").strip()
+        or os.getenv("TRIPSTAR_AMAP_WEB_KEY", "").strip()
+    )
 
     # 路径
     base_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent)

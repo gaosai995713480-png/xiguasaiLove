@@ -49,11 +49,16 @@
 ### 后端
 
 ```bash
-cd backend
-pip install -r ../requirements.txt
-cp ../.env.example ../.env   # 配置环境变量
-uvicorn main:app --reload    # 开发模式，接口文档: http://localhost:8000/docs/api
+pip install -r requirements.txt
+cp .env.example .env         # 配置环境变量
+uvicorn backend.main:app --reload
+# 接口文档: http://localhost:8000/docs/api
 ```
+
+首次创建数据库时，如果没有配置 `INITIAL_ADMIN_PASSWORD`、
+`INITIAL_GALLERY_PASSWORD` 和 `INITIAL_INVITE_CODE`，服务会生成随机初始值
+并写入 `tmp/initial_credentials.txt`（不会写入日志）。已有数据库中的正常值不会被覆盖；
+如果检测到历史固定默认值，会自动轮换到随机值并写入该文件。
 
 ### 前端
 
@@ -67,8 +72,12 @@ npm run build                # 生产构建
 ### 测试
 
 ```bash
+python -m pip install -r requirements-dev.txt
 python -m pytest tests/
 ```
+
+> 测试当前会读取 `.env` 中的数据库配置。运行前请确认使用独立测试库，
+> 不要直接对生产库执行完整测试。
 
 ## 🚢 部署
 
@@ -80,9 +89,11 @@ python -m pytest tests/
 
 - 数据库连接（`DB_HOST` / `DB_USER` / `DB_PASSWORD` 等）
 - 阿里云 OSS 凭证（`OSS_*`）
-- 高德地图 Key（`AMAP_KEY`）
+- 高德地图 Key（后端 `AMAP_KEY`；TripStar 可用 `TRIPSTAR_AMAP_WEB_KEY`）
+- 高德前端地图（`VITE_TRIPSTAR_AMAP_WEB_JS_KEY` / `VITE_TRIPSTAR_AMAP_SECURITY_JS_CODE`）
 - 快递100 配置（`KUAIDI100_*`）
 - AI 服务配置（模型 API Key 等）
+- 首次建库凭据（`INITIAL_*`）与会话/CORS 配置（`COOKIE_SECURE`、`CORS_ORIGINS`）
 
 > ⚠️ 请勿将 `.env` 提交到仓库（已在 `.gitignore` 中排除）
 

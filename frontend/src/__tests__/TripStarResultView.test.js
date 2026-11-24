@@ -139,4 +139,35 @@ describe('TripStarResultView', () => {
     expect(sessionStorage.getItem('tripstar.latestTaskId')).toBeNull()
     expect(mockPush).toHaveBeenCalledWith('/tripstar')
   })
+
+  it('单次轮询失败不会立即把仍在处理的任务判死', async () => {
+    mockGetStatus
+      .mockRejectedValueOnce(new Error('temporary network error'))
+      .mockResolvedValueOnce({
+        task_id: 'task-001',
+        status: 'processing',
+        progress: 60,
+        message: '继续规划中',
+      })
+
+    const { default: TripStarResultView } = await import('../views/TripStarResultView.vue')
+    const wrapper = mount(TripStarResultView, {
+      global: {
+        stubs: {
+          TopBar: { template: '<div><slot /></div>' },
+        },
+      },
+    })
+
+    await flushPromises()
+    expect(wrapper.text()).toContain('正在重试')
+    expect(wrapper.text()).not.toContain('规划失败')
+
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(mockGetStatus).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('继续规划中')
+    expect(wrapper.text()).not.toContain('规划失败')
+  })
 })

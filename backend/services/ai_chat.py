@@ -18,6 +18,56 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT = 120
 
+
+def build_anthropic_messages_url(base_url: str) -> str:
+    base = (base_url or "").rstrip("/")
+    if not base:
+        return ""
+    if base.endswith("/v1/messages"):
+        return base
+    if base.endswith("/v1"):
+        return f"{base}/messages"
+    return f"{base}/v1/messages"
+
+
+def build_openai_chat_url(base_url: str, *, include_v1: bool = True) -> str:
+    base = (base_url or "").rstrip("/")
+    if not base:
+        return ""
+    if base.endswith("/chat/completions"):
+        return base
+    if base.endswith("/v1"):
+        return f"{base}/chat/completions"
+    if include_v1:
+        return f"{base}/v1/chat/completions"
+    return f"{base}/chat/completions"
+
+
+def build_openai_responses_url(base_url: str) -> str:
+    base = (base_url or "").rstrip("/")
+    if not base:
+        return ""
+    if base.endswith("/responses"):
+        return base
+    if base.endswith("/v1"):
+        return f"{base}/responses"
+    return f"{base}/v1/responses"
+
+
+def split_anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
+    system_parts: list[str] = []
+    chat_messages: list[dict] = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if role == "system":
+            if content:
+                system_parts.append(str(content))
+        else:
+            chat_messages.append({"role": role, "content": content})
+    return "\n\n".join(system_parts), chat_messages
+
+
 # ==================== Claude 配置 ====================
 
 CLAUDE_BASE_URL_KEY = "CLAUDE_BASE_URL"
@@ -112,7 +162,7 @@ class ClaudeApiProvider(AiProvider):
     async def stream_chat(
         self, messages: list[dict]
     ) -> AsyncGenerator[str, None]:
-        url = f"{self.base_url}/v1/messages"
+        url = build_anthropic_messages_url(self.base_url)
         headers = {
             "x-api-key": self.api_key,
             "anthropic-version": "2023-06-01",
@@ -120,15 +170,7 @@ class ClaudeApiProvider(AiProvider):
         }
 
         # 构建 Anthropic Messages API 格式
-        system_text = ""
-        chat_messages = []
-        for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if role == "system":
-                system_text = content
-            else:
-                chat_messages.append({"role": role, "content": content})
+        system_text, chat_messages = split_anthropic_messages(messages)
 
         body = {
             "model": self.model,
@@ -184,7 +226,7 @@ class CodexProvider(AiProvider):
     async def stream_chat(
         self, messages: list[dict]
     ) -> AsyncGenerator[str, None]:
-        url = f"{self.base_url}/v1/responses"
+        url = build_openai_responses_url(self.base_url)
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -257,7 +299,7 @@ class GlmProvider(AiProvider):
     async def stream_chat(
         self, messages: list[dict]
     ) -> AsyncGenerator[str, None]:
-        url = f"{self.base_url}/v1/chat/completions"
+        url = build_openai_chat_url(self.base_url, include_v1=False)
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -320,7 +362,7 @@ class GrokProvider(AiProvider):
     async def stream_chat(
         self, messages: list[dict]
     ) -> AsyncGenerator[str, None]:
-        url = f"{self.base_url}/v1/chat/completions"
+        url = build_openai_chat_url(self.base_url)
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",

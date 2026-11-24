@@ -1,6 +1,9 @@
 """时间胶囊路由"""
 import datetime
+
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+
 from ..database import get_db
 from ..config import settings
 from ..dependencies import require_auth, require_role
@@ -8,8 +11,19 @@ from ..dependencies import require_auth, require_role
 router = APIRouter(prefix="/api", tags=["capsule"])
 
 
+def _error(message: str, status_code: int) -> JSONResponse:
+    return JSONResponse({"error": message}, status_code=status_code)
+
+
+def _parse_date(value: str) -> datetime.date | None:
+    try:
+        return datetime.date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @router.get("/capsules")
-def list_capsules():
+def list_capsules(_=Depends(require_auth)):
     today = datetime.date.today()
     with get_db() as conn:
         with conn.cursor() as cursor:
@@ -38,7 +52,11 @@ def create_capsule(body: dict, _=Depends(require_role("admin"))):
     content = str(body.get("content", "")).strip()
     open_date = str(body.get("open_date", "")).strip()
     if not content or not open_date:
-        return {"error": "content and open_date are required"}, 400
+        return _error("content and open_date are required", 400)
+    if len(content) > 10000:
+        return _error("content too long (max 10000)", 400)
+    if _parse_date(open_date) is None:
+        return _error("invalid open_date", 400)
 
     with get_db() as conn:
         with conn.cursor() as cursor:
@@ -58,7 +76,7 @@ def open_capsule(body: dict, _=Depends(require_auth)):
     except (ValueError, TypeError):
         capsule_id = 0
     if capsule_id <= 0:
-        return {"error": "invalid id"}, 400
+        return _error("invalid id", 400)
 
     today = datetime.date.today()
     with get_db() as conn:
@@ -69,10 +87,13 @@ def open_capsule(body: dict, _=Depends(require_auth)):
             )
             row = cursor.fetchone()
             if not row:
-                return {"error": "not found"}, 404
+                return _error("not found", 404)
             open_date = row[2]
             if not open_date or open_date > today:
-                return {"error": "还没到开启日期哦", "can_open": False}, 403
+                return JSONResponse(
+                    {"error": "还没到开启日期哦", "can_open": False},
+                    status_code=403,
+                )
             if not row[3]:
                 cursor.execute(
                     f"UPDATE `{settings.capsule_table}` SET is_opened = 1 WHERE id = %s",

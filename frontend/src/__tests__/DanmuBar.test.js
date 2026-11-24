@@ -124,4 +124,27 @@ describe('DanmuBar', () => {
 
     wrapper.unmount()
   })
+
+  it('弹幕文本通过 textContent 渲染，不会执行后端 HTML', async () => {
+    const payload = '<img src=x onerror="window.__danmuXss=1">'
+    mockList.mockResolvedValue([
+      { id: 42, text: payload, likes: 3 },
+    ])
+
+    const { default: DanmuBar } = await import('../components/DanmuBar.vue')
+    const wrapper = mount(DanmuBar, { attachTo: document.body })
+    await flushPromises()
+
+    await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS)
+
+    const layer = wrapper.find('#danmu-layer').element
+    const item = layer.querySelector('.danmu-item')
+    expect(item).not.toBeNull()
+    expect(item.querySelector('img')).toBeNull()
+    expect(item.querySelector('span').textContent).toBe(payload)
+    expect(item.querySelector('.danmu-like').textContent).toContain('3')
+    expect(item.querySelector('.danmu-like').dataset.id).toBe('42')
+
+    wrapper.unmount()
+  })
 })

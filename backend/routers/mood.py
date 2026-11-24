@@ -1,6 +1,9 @@
 """心情打卡路由"""
 import datetime
+
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+
 from ..database import get_db
 from ..config import settings
 from ..dependencies import require_auth, require_role
@@ -8,13 +11,32 @@ from ..dependencies import require_auth, require_role
 router = APIRouter(prefix="/api", tags=["mood"])
 
 
+def _error(message: str, status_code: int) -> JSONResponse:
+    return JSONResponse({"error": message}, status_code=status_code)
+
+
+def _parse_date(value: str) -> datetime.date | None:
+    try:
+        return datetime.date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @router.get("/mood")
-def list_mood(year: int = None, month: int = None):
+def list_mood(
+    year: int | None = None,
+    month: int | None = None,
+    _=Depends(require_auth),
+):
     today = datetime.date.today()
     if year is None:
         year = today.year
     if month is None:
         month = today.month
+    if year < 1 or year > 9999:
+        return _error("invalid year", 400)
+    if month < 1 or month > 12:
+        return _error("invalid month", 400)
 
     start_date = f"{year:04d}-{month:02d}-01"
     if month == 12:
@@ -49,11 +71,18 @@ def save_mood(body: dict, _=Depends(require_role("admin"))):
     try:
         level = int(body.get("level", 3))
     except (ValueError, TypeError):
-        level = 3
-    level = max(1, min(5, level))
+        return _error("level must be an integer", 400)
+    if level < 1 or level > 5:
+        return _error("level must be between 1 and 5", 400)
 
     if not mood_date:
         mood_date = datetime.date.today().isoformat()
+    if _parse_date(mood_date) is None:
+        return _error("invalid mood_date", 400)
+    if len(emoji) > 10:
+        return _error("emoji too long (max 10)", 400)
+    if len(note) > 200:
+        return _error("note too long (max 200)", 400)
 
     with get_db() as conn:
         with conn.cursor() as cursor:

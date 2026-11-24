@@ -1,19 +1,27 @@
 <script setup>
-import { ref, reactive, nextTick, onMounted, computed } from 'vue'
+import { ref, reactive, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useContextStore } from '../stores/context'
+import { fetchWithAuth } from '../api'
+import { renderMarkdown as renderSafeMarkdown } from '../utils/markdown'
 
 const authStore = useAuthStore()
 const contextStore = useContextStore()
+const AI_ICON_URL = '/ai-icon.png'
 
 const isOpen = ref(false)
 const isLoading = ref(false)
 const inputText = ref('')
 let abortController = null
+let activeTypewriterFrame = 0
+let activeTypewriterFinalize = null
+let componentUnmounted = false
+let sendRequestSeq = 0
 const listRef = ref(null)
 
 // 当前选中的供应商
 const activeProvider = ref('codex') // 'codex' | 'claude'
+const PROVIDER_LABELS = { claude: 'Claude', codex: 'Codex', glm: 'GLM', grok: 'Grok' }
 
 // 各供应商状态
 const providerStatus = reactive({
@@ -28,6 +36,18 @@ const claudeMessages = ref([])
 const codexMessages = ref([])
 const glmMessages = ref([])
 const grokMessages = ref([])
+const activeConversationIds = reactive({
+  claude: null,
+  codex: null,
+  glm: null,
+  grok: null,
+})
+const activeConversationId = computed({
+  get: () => activeConversationIds[activeProvider.value] ?? null,
+  set: (value) => {
+    activeConversationIds[activeProvider.value] = value || null
+  },
+})
 
 const currentMessages = computed(() => {
   if (activeProvider.value === 'claude') return claudeMessages.value
@@ -69,11 +89,17 @@ const codexConfig = ref({ base_url: '', api_key: '', model: 'gpt-5.4-codex' })
 const glmConfig = ref({ base_url: 'https://open.bigmodel.cn/api/paas/v4', api_key: '', model: 'glm-4-flash' })
 const grokConfig = ref({ base_url: 'https://api.x.ai', api_key: '', model: 'grok-3' })
 const agentConfig = ref({ show_tool_process: true, max_tool_rounds: 5 })
+const configuredApiKeys = reactive({
+  claude: false,
+  codex: false,
+  glm: false,
+  grok: false,
+})
 
 // 检查供应商状态
 async function checkStatus() {
   try {
-    const res = await fetch('/api/ai/status')
+    const res = await fetchWithAuth('/api/ai/status')
     if (res.ok) {
       const data = await res.json()
       Object.assign(providerStatus.claude, data.claude)
@@ -88,34 +114,42 @@ async function checkStatus() {
 async function loadConfig() {
   try {
     const [cRes, xRes, gRes, kRes] = await Promise.all([
-      fetch('/api/ai/config/claude'),
-      fetch('/api/ai/config/codex'),
-      fetch('/api/ai/config/glm'),
-      fetch('/api/ai/config/grok'),
+      fetchWithAuth('/api/ai/config/claude'),
+      fetchWithAuth('/api/ai/config/codex'),
+      fetchWithAuth('/api/ai/config/glm'),
+      fetchWithAuth('/api/ai/config/grok'),
     ])
     if (cRes.ok) {
       const d = await cRes.json()
       claudeConfig.value.base_url = d.base_url || ''
       claudeConfig.value.model = d.model || ''
+      claudeConfig.value.api_key = ''
+      configuredApiKeys.claude = Boolean(d.api_key_configured)
     }
     if (xRes.ok) {
       const d = await xRes.json()
       codexConfig.value.base_url = d.base_url || ''
       codexConfig.value.model = d.model || ''
+      codexConfig.value.api_key = ''
+      configuredApiKeys.codex = Boolean(d.api_key_configured)
     }
     if (gRes.ok) {
       const d = await gRes.json()
       glmConfig.value.base_url = d.base_url || ''
       glmConfig.value.model = d.model || ''
+      glmConfig.value.api_key = ''
+      configuredApiKeys.glm = Boolean(d.api_key_configured)
     }
     if (kRes.ok) {
       const d = await kRes.json()
       grokConfig.value.base_url = d.base_url || ''
       grokConfig.value.model = d.model || ''
+      grokConfig.value.api_key = ''
+      configuredApiKeys.grok = Boolean(d.api_key_configured)
     }
     // Agent 配置
     try {
-      const aRes = await fetch('/api/ai/config/agent')
+      const aRes = await fetchWithAuth('/api/ai/config/agent')
       if (aRes.ok) {
         const d = await aRes.json()
         agentConfig.value.show_tool_process = d.show_tool_process ?? true
@@ -129,7 +163,7 @@ async function loadConfig() {
 async function saveClaudeConfig() {
   configSaving.value = true
   try {
-    await fetch('/api/ai/config/claude', {
+    await fetchWithAuth('/api/ai/config/claude', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(claudeConfig.value),
@@ -143,7 +177,7 @@ async function saveClaudeConfig() {
 async function saveCodexConfig() {
   configSaving.value = true
   try {
-    await fetch('/api/ai/config/codex', {
+    await fetchWithAuth('/api/ai/config/codex', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(codexConfig.value),
@@ -157,7 +191,7 @@ async function saveCodexConfig() {
 async function saveGlmConfig() {
   configSaving.value = true
   try {
-    await fetch('/api/ai/config/glm', {
+    await fetchWithAuth('/api/ai/config/glm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(glmConfig.value),
@@ -171,7 +205,7 @@ async function saveGlmConfig() {
 async function saveGrokConfig() {
   configSaving.value = true
   try {
-    await fetch('/api/ai/config/grok', {
+    await fetchWithAuth('/api/ai/config/grok', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(grokConfig.value),
@@ -185,7 +219,7 @@ async function saveGrokConfig() {
 async function saveAgentConfig() {
   configSaving.value = true
   try {
-    await fetch('/api/ai/config/agent', {
+    await fetchWithAuth('/api/ai/config/agent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(agentConfig.value),
@@ -206,7 +240,7 @@ const memoryList = ref([])
 
 async function loadMemory() {
   try {
-    const res = await fetch('/api/ai/memory')
+    const res = await fetchWithAuth('/api/ai/memory')
     if (res.ok) {
       const d = await res.json()
       memoryList.value = d.facts || []
@@ -217,7 +251,7 @@ async function loadMemory() {
 async function deleteMemory(m) {
   if (!confirm(`确定删除这条记忆？\n\n${m.content}`)) return
   try {
-    await fetch(`/api/ai/memory?id=${m.id}`, { method: 'DELETE' })
+    await fetchWithAuth(`/api/ai/memory?id=${m.id}`, { method: 'DELETE' })
     memoryList.value = memoryList.value.filter(f => f.id !== m.id)
   } catch { /* ignore */ }
 }
@@ -263,7 +297,7 @@ function clearActiveSkill(provider) {
 
 async function loadSkills() {
   try {
-    const res = await fetch('/api/ai/skills')
+    const res = await fetchWithAuth('/api/ai/skills')
     if (res.ok) skillsList.value = await res.json()
   } catch { /* ignore */ }
 }
@@ -273,13 +307,13 @@ async function saveSkill() {
   try {
     let res
     if (editingSkill.value) {
-      res = await fetch(`/api/ai/skills/${editingSkill.value.id}`, {
+      res = await fetchWithAuth(`/api/ai/skills/${editingSkill.value.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
     } else {
-      res = await fetch('/api/ai/skills', {
+      res = await fetchWithAuth('/api/ai/skills', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -312,7 +346,7 @@ function startCreateSkill() {
 
 async function deleteSkill(skill) {
   try {
-    await fetch(`/api/ai/skills/${skill.id}`, { method: 'DELETE' })
+    await fetchWithAuth(`/api/ai/skills/${skill.id}`, { method: 'DELETE' })
     await loadSkills()
     // 如果删除的是当前激活的，清除激活
     for (const p of ['codex', 'glm', 'grok', 'claude']) {
@@ -325,35 +359,47 @@ async function deleteSkill(skill) {
 // ===== 对话持久化 =====
 const showHistory = ref(false)
 const conversations = ref([])
-const activeConversationId = ref(null)
 const historySearchQuery = ref('')
 const historyLoading = ref(false)
+const creatingConversation = ref(false)
+let historyRequestSeq = 0
 
-async function loadConversations() {
+function messagesFor(provider) {
+  const msgsMap = { claude: claudeMessages, codex: codexMessages, glm: glmMessages, grok: grokMessages }
+  return msgsMap[provider]
+}
+
+async function loadConversations(provider = activeProvider.value) {
+  const requestId = ++historyRequestSeq
   try {
-    const res = await fetch(`/api/ai/conversations?provider=${activeProvider.value}`)
-    if (res.ok) conversations.value = await res.json()
+    const res = await fetchWithAuth(`/api/ai/conversations?provider=${provider}`)
+    if (!res.ok) return
+    const data = await res.json()
+    if (requestId !== historyRequestSeq || provider !== activeProvider.value) return
+    conversations.value = data
   } catch { /* ignore */ }
 }
 
-async function createConversation() {
-  const provider = activeProvider.value
-  const labels = { claude: 'Claude', codex: 'Codex', glm: 'GLM', grok: 'Grok' }
+async function createConversation({
+  provider = activeProvider.value,
+  resetMessages = true,
+  activate = true,
+} = {}) {
   try {
-    const res = await fetch('/api/ai/conversations', {
+    const res = await fetchWithAuth('/api/ai/conversations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider, title: '新对话' }),
     })
     if (res.ok) {
       const data = await res.json()
-      activeConversationId.value = data.id
-      // 重置消息
-      const msgsMap = { claude: claudeMessages, codex: codexMessages, glm: glmMessages, grok: grokMessages }
-      msgsMap[provider].value = [{
-        role: 'assistant',
-        content: `你好！我是 ${labels[provider]}，有什么可以帮你的吗？ 😊`,
-      }]
+      if (activate) activeConversationIds[provider] = data.id
+      if (resetMessages) {
+        messagesFor(provider).value = [{
+          role: 'assistant',
+          content: `你好！我是 ${PROVIDER_LABELS[provider]}，有什么可以帮你的吗？ 😊`,
+        }]
+      }
       return data.id
     }
   } catch { /* ignore */ }
@@ -361,47 +407,61 @@ async function createConversation() {
 }
 
 async function openConversation(conv) {
+  if (isLoading.value) return
+  const provider = activeProvider.value
+  const requestId = ++historyRequestSeq
   historyLoading.value = true
   try {
-    const res = await fetch(`/api/ai/conversations/${conv.id}/messages`)
+    const res = await fetchWithAuth(`/api/ai/conversations/${conv.id}/messages`)
     if (res.ok) {
       const data = await res.json()
-      const msgsMap = { claude: claudeMessages, codex: codexMessages, glm: glmMessages, grok: grokMessages }
-      if (data.messages.length > 0) {
-        msgsMap[activeProvider.value].value = data.messages.map(m => ({ role: m.role, content: m.content }))
+      if (requestId !== historyRequestSeq || provider !== activeProvider.value) return
+      const savedMessages = Array.isArray(data.messages) ? data.messages : []
+      if (savedMessages.length > 0) {
+        messagesFor(provider).value = savedMessages.map(m => ({ role: m.role, content: m.content }))
       } else {
-        const labels = { claude: 'Claude', codex: 'Codex', glm: 'GLM', grok: 'Grok' }
-        msgsMap[activeProvider.value].value = [{
+        messagesFor(provider).value = [{
           role: 'assistant',
-          content: `你好！我是 ${labels[activeProvider.value]}，有什么可以帮你的吗？ 😊`,
+          content: `你好！我是 ${PROVIDER_LABELS[provider]}，有什么可以帮你的吗？ 😊`,
         }]
       }
-      activeConversationId.value = conv.id
+      activeConversationIds[provider] = conv.id
       showHistory.value = false
       scrollToBottom()
     }
   } catch { /* ignore */ }
-  historyLoading.value = false
+  finally {
+    if (requestId === historyRequestSeq) historyLoading.value = false
+  }
 }
 
 async function deleteConversation(conv) {
+  if (isLoading.value) return
+  const provider = activeProvider.value
   try {
-    await fetch(`/api/ai/conversations/${conv.id}`, { method: 'DELETE' })
+    const res = await fetchWithAuth(`/api/ai/conversations/${conv.id}`, { method: 'DELETE' })
+    if (!res.ok) return
     conversations.value = conversations.value.filter(c => c.id !== conv.id)
-    if (activeConversationId.value === conv.id) {
-      activeConversationId.value = null
+    if (activeConversationIds[provider] === conv.id) {
+      activeConversationIds[provider] = null
     }
   } catch { /* ignore */ }
 }
 
 async function searchConversations() {
+  const provider = activeProvider.value
   if (!historySearchQuery.value.trim()) {
-    await loadConversations()
+    await loadConversations(provider)
     return
   }
+  const query = historySearchQuery.value
+  const requestId = ++historyRequestSeq
   try {
-    const res = await fetch(`/api/ai/conversations/search?q=${encodeURIComponent(historySearchQuery.value)}&provider=${activeProvider.value}`)
-    if (res.ok) conversations.value = await res.json()
+    const res = await fetchWithAuth(`/api/ai/conversations/search?q=${encodeURIComponent(query)}&provider=${provider}`)
+    if (!res.ok) return
+    const data = await res.json()
+    if (requestId !== historyRequestSeq || provider !== activeProvider.value) return
+    conversations.value = data
   } catch { /* ignore */ }
 }
 
@@ -409,33 +469,47 @@ async function saveConversationMessages(convId, userText, aiText) {
   try {
     const msgs = [{ role: 'user', content: userText }]
     if (aiText) msgs.push({ role: 'assistant', content: aiText })
-    await fetch(`/api/ai/conversations/${convId}/messages`, {
+    const res = await fetchWithAuth(`/api/ai/conversations/${convId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(msgs),
     })
+    if (!res.ok) return false
     // 如果是第一条消息，用用户文本更新标题
     const conv = conversations.value.find(c => c.id === convId)
     if (!conv || conv.title === '新对话') {
       const title = userText.slice(0, 20) + (userText.length > 20 ? '...' : '')
-      await fetch(`/api/ai/conversations/${convId}/title`, {
+      await fetchWithAuth(`/api/ai/conversations/${convId}/title`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title }),
       })
     }
-  } catch { /* ignore */ }
+    return true
+  } catch {
+    return false
+  }
 }
 
 function openHistoryPanel() {
   showHistory.value = true
   historySearchQuery.value = ''
-  loadConversations()
+  loadConversations(activeProvider.value)
 }
 
-function startNewConversation() {
-  createConversation()
-  showHistory.value = false
+async function startNewConversation() {
+  if (isLoading.value || creatingConversation.value) return
+  creatingConversation.value = true
+  const provider = activeProvider.value
+  try {
+    const id = await createConversation({ provider })
+    if (id && provider === activeProvider.value) {
+      showHistory.value = false
+      scrollToBottom()
+    }
+  } finally {
+    creatingConversation.value = false
+  }
 }
 
 function formatTime(dateStr) {
@@ -451,6 +525,7 @@ function formatTime(dateStr) {
 }
 
 onMounted(() => {
+  componentUnmounted = false
   checkStatus()
   initMessages('claude')
   initMessages('codex')
@@ -460,32 +535,44 @@ onMounted(() => {
   loadActiveSkills()
 })
 
+onUnmounted(() => {
+  componentUnmounted = true
+  abortController?.abort()
+  cancelTypewriter()
+})
+
 function toggleChat() {
   isOpen.value = !isOpen.value
   if (isOpen.value) scrollToBottom()
 }
 
 function initMessages(provider) {
-  const msgsMap = { claude: claudeMessages, codex: codexMessages, glm: glmMessages, grok: grokMessages }
-  const msgs = msgsMap[provider]
+  const msgs = messagesFor(provider)
   if (msgs.value.length > 0) return
 
   const saved = loadMessages(provider)
   if (saved.length > 0) {
     msgs.value = saved
   } else {
-    const labels = { claude: 'Claude', codex: 'Codex', glm: 'GLM', grok: 'Grok' }
     msgs.value.push({
       role: 'assistant',
-      content: `你好！我是 ${labels[provider]}，有什么可以帮你的吗？ 😊`,
+      content: `你好！我是 ${PROVIDER_LABELS[provider]}，有什么可以帮你的吗？ 😊`,
     })
   }
 }
 
+function hasConfiguredApiKey(provider, config) {
+  return configuredApiKeys[provider] || Boolean(config.api_key?.trim())
+}
+
 function switchProvider(p) {
   if (isLoading.value) return
+  historyRequestSeq += 1
+  historyLoading.value = false
   activeProvider.value = p
   showConfig.value = false
+  showHistory.value = false
+  showSkillDropdown.value = false
   scrollToBottom()
 }
 
@@ -495,20 +582,30 @@ function scrollToBottom() {
   })
 }
 
-function stopGeneration() {
-  if (abortController) {
-    abortController.abort()
-    abortController = null
+function cancelTypewriter() {
+  if (activeTypewriterFrame) {
+    cancelAnimationFrame(activeTypewriterFrame)
+    activeTypewriterFrame = 0
   }
-  isLoading.value = false
+  const finalize = activeTypewriterFinalize
+  activeTypewriterFinalize = null
+  finalize?.()
+}
+
+function stopGeneration() {
+  abortController?.abort()
+  cancelTypewriter()
 }
 
 async function sendMessage() {
   const text = inputText.value.trim()
-  if (!text || isLoading.value) return
+  if (!text || isLoading.value || creatingConversation.value) return
 
-  const msgsMap = { claude: claudeMessages, codex: codexMessages, glm: glmMessages, grok: grokMessages }
-  const msgs = msgsMap[activeProvider.value]
+  const provider = activeProvider.value
+  const sendRequestId = ++sendRequestSeq
+  const conversationIdAtStart = activeConversationIds[provider] || null
+  const skillId = activeSkills[provider]?.id || null
+  const msgs = messagesFor(provider)
 
   msgs.value.push({ role: 'user', content: text })
   inputText.value = ''
@@ -522,42 +619,75 @@ async function sendMessage() {
   msgs.value.push({ role: 'assistant', content: '' })
   const aiMsg = msgs.value[msgs.value.length - 1]  // 获取响应式代理引用
   isLoading.value = true
-  abortController = new AbortController()
+  const controller = new AbortController()
+  abortController = controller
   scrollToBottom()
 
+  let textBuffer = ''
+  let streamDone = false
+  let shouldPersistResponse = true
+  let typewriterFlushTimer = null
+  let resolveTypewriterFinished = null
+  const typewriterFinished = new Promise((resolve) => {
+    resolveTypewriterFinished = resolve
+  })
+  const finalizeTypewriter = () => {
+    if (textBuffer) {
+      aiMsg.content += textBuffer
+      textBuffer = ''
+      scrollToBottom()
+    }
+    if (typewriterFlushTimer) {
+      clearTimeout(typewriterFlushTimer)
+      typewriterFlushTimer = null
+    }
+    resolveTypewriterFinished?.()
+    resolveTypewriterFinished = null
+    if (activeTypewriterFinalize === finalizeTypewriter) {
+      activeTypewriterFinalize = null
+    }
+  }
+  activeTypewriterFinalize = finalizeTypewriter
+
   try {
-    const res = await fetch('/api/ai/chat', {
+    const res = await fetchWithAuth('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: text,
         history,
-        provider: activeProvider.value,
-        skill_id: activeSkills[activeProvider.value]?.id || null,
+        provider,
+        skill_id: skillId,
         client_context: contextStore.getFormattedContext(),
       }),
-      signal: abortController.signal,
+      signal: controller.signal,
     })
 
     if (!res.ok) {
-      aiMsg.content = `请求失败 (${res.status})`
-      isLoading.value = false
-      return
+      throw new Error(`请求失败 (${res.status})`)
     }
+    if (!res.body) throw new Error('响应流为空')
 
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let sseBuffer = ''
 
     // 打字机缓冲区
-    let textBuffer = ''       // SSE 收到但尚未渲染的字符
-    let typewriterDone = false
-    let streamDone = false
     const CHAR_INTERVAL = 18  // 每个字符的渲染间隔(ms)
 
     // 启动逐字输出定时器
     let lastTime = 0
+    function scheduleTypewriter() {
+      if (componentUnmounted) {
+        activeTypewriterFrame = 0
+        return
+      }
+      activeTypewriterFrame = requestAnimationFrame(typewriterTick)
+    }
+
     function typewriterTick(timestamp) {
+      activeTypewriterFrame = 0
+      if (componentUnmounted) return
       if (!lastTime) lastTime = timestamp
       const elapsed = timestamp - lastTime
 
@@ -571,12 +701,12 @@ async function sendMessage() {
       }
 
       if (!streamDone || textBuffer.length > 0) {
-        requestAnimationFrame(typewriterTick)
+        scheduleTypewriter()
       } else {
-        typewriterDone = true
+        finalizeTypewriter()
       }
     }
-    requestAnimationFrame(typewriterTick)
+    scheduleTypewriter()
 
     // SSE 读取循环 — 数据写入 buffer 而非直接渲染
     while (true) {
@@ -617,50 +747,63 @@ async function sendMessage() {
 
     // SSE 结束，flush 缓冲区剩余内容
     streamDone = true
-    // 等待打字机输出完毕（最多 5 秒）
     if (textBuffer.length > 0) {
-      await new Promise(resolve => {
-        const checkFlush = () => {
-          if (typewriterDone || textBuffer.length === 0) {
-            // 确保全部输出
-            if (textBuffer.length > 0) {
-              aiMsg.content += textBuffer
-              textBuffer = ''
-              scrollToBottom()
-            }
-            resolve()
-          } else {
-            setTimeout(checkFlush, 50)
-          }
-        }
-        checkFlush()
-      })
+      // 打字机正常动画；停止/卸载时 activeTypewriterFinalize 会立即兑现。
+      await Promise.race([
+        typewriterFinished,
+        new Promise((resolve) => {
+          typewriterFlushTimer = setTimeout(resolve, 5000)
+        }),
+      ])
+      if (typewriterFlushTimer) {
+        clearTimeout(typewriterFlushTimer)
+        typewriterFlushTimer = null
+      }
+      if (textBuffer.length > 0) finalizeTypewriter()
     }
 
     if (!aiMsg.content) aiMsg.content = '抱歉，没有收到回复。'
   } catch (e) {
+    streamDone = true
+    cancelTypewriter()
+    if (textBuffer) {
+      aiMsg.content += textBuffer
+      textBuffer = ''
+    }
     if (e.name === 'AbortError') {
-      // 停止生成时，flush 剩余 buffer
       if (!aiMsg.content) aiMsg.content = '（已停止生成）'
+    } else if (e.isUnauthorized) {
+      shouldPersistResponse = false
+      aiMsg.content = '登录已过期，请重新登录'
     } else {
+      shouldPersistResponse = false
       aiMsg.content += `\n\n连接失败: ${e.message}`
     }
   } finally {
-    isLoading.value = false
-    abortController = null
-    saveMessages(activeProvider.value)
-    scrollToBottom()
+    streamDone = true
+    cancelTypewriter()
+    const shouldFinalizeRequest = abortController === controller
 
-    // 持久化到数据库
-    const userText = text
-    const aiText = aiMsg.content
-    if (aiText && aiText !== '抱歉，没有收到回复。' && aiText !== '（已停止生成）') {
-      let convId = activeConversationId.value
-      if (!convId) convId = await createConversation()
-      if (convId) {
-        activeConversationId.value = convId
-        await saveConversationMessages(convId, userText, aiText)
+    if (!componentUnmounted && sendRequestId === sendRequestSeq) {
+      saveMessages(provider)
+      scrollToBottom()
+
+      // 持久化到请求开始时绑定的 provider/conversation，避免中途切页串会话。
+      const aiText = aiMsg.content
+      if (shouldPersistResponse && aiText && aiText !== '抱歉，没有收到回复。' && aiText !== '（已停止生成）' && aiText !== '登录已过期，请重新登录') {
+        let convId = conversationIdAtStart
+        if (!convId) {
+          convId = await createConversation({ provider, resetMessages: false, activate: false })
+        }
+        if (convId && sendRequestId === sendRequestSeq) {
+          if (!activeConversationIds[provider]) activeConversationIds[provider] = convId
+          await saveConversationMessages(convId, text, aiText)
+        }
       }
+    }
+    if (shouldFinalizeRequest) {
+      abortController = null
+      isLoading.value = false
     }
   }
 }
@@ -673,14 +816,17 @@ function handleKeydown(e) {
 }
 
 function clearChat() {
-  const msgsMap = { claude: claudeMessages, codex: codexMessages, glm: glmMessages, grok: grokMessages }
-  const labels = { claude: 'Claude', codex: 'Codex', glm: 'GLM', grok: 'Grok' }
-  const msgs = msgsMap[activeProvider.value]
+  sendRequestSeq += 1
+  abortController?.abort()
+  cancelTypewriter()
+  const provider = activeProvider.value
+  activeConversationIds[provider] = null
+  const msgs = messagesFor(provider)
   msgs.value = [{
     role: 'assistant',
-    content: `你好！我是 ${labels[activeProvider.value]}，有什么可以帮你的吗？ 😊`,
+    content: `你好！我是 ${PROVIDER_LABELS[provider]}，有什么可以帮你的吗？ 😊`,
   }]
-  saveMessages(activeProvider.value)
+  saveMessages(provider)
 }
 
 async function handleBubbleClick(e) {
@@ -731,7 +877,7 @@ async function handleBubbleClick(e) {
     <button class="ai-fab" :class="{ 'is-open': isOpen }" @click="toggleChat">
       <span class="ai-fab-icon">
         <template v-if="isOpen">✕</template>
-        <img v-else src="/ai-icon.png" alt="AI" class="ai-icon-img" />
+        <img v-else :src="AI_ICON_URL" alt="AI" class="ai-icon-img" />
       </span>
       <span v-if="!isOpen" class="ai-fab-pulse"></span>
     </button>
@@ -825,7 +971,9 @@ async function handleBubbleClick(e) {
               @input="searchConversations"
             />
           </div>
-          <button class="history-new-btn" @click="startNewConversation">＋ 开启新对话</button>
+          <button class="history-new-btn" :disabled="creatingConversation || isLoading" @click="startNewConversation">
+            {{ creatingConversation ? '创建中...' : '＋ 开启新对话' }}
+          </button>
           <div class="history-list">
             <div v-if="conversations.length === 0" class="history-empty">暂无对话记录</div>
             <div
@@ -920,7 +1068,7 @@ async function handleBubbleClick(e) {
               <div class="config-field"><label>API 地址</label><input v-model="codexConfig.base_url" type="text" placeholder="https://ai.qaq.al" /></div>
               <div class="config-field"><label>API Key</label><input v-model="codexConfig.api_key" type="password" placeholder="sk-..." /></div>
               <div class="config-field"><label>模型</label><input v-model="codexConfig.model" type="text" placeholder="gpt-5.4-codex" /></div>
-              <button class="config-save" :disabled="!codexConfig.base_url || !codexConfig.api_key || configSaving" @click="saveCodexConfig">{{ configSaving ? '保存中...' : '💾 保存 Codex' }}</button>
+              <button class="config-save" :disabled="!codexConfig.base_url || !hasConfiguredApiKey('codex', codexConfig) || configSaving" @click="saveCodexConfig">{{ configSaving ? '保存中...' : '💾 保存 Codex' }}</button>
             </div>
             <div class="config-divider"></div>
             <div class="config-section">
@@ -928,7 +1076,7 @@ async function handleBubbleClick(e) {
               <div class="config-field"><label>API 地址</label><input v-model="glmConfig.base_url" type="text" placeholder="https://open.bigmodel.cn/api/paas/v4" /></div>
               <div class="config-field"><label>API Key</label><input v-model="glmConfig.api_key" type="password" placeholder="智谱 API Key" /></div>
               <div class="config-field"><label>模型</label><input v-model="glmConfig.model" type="text" placeholder="glm-4-flash" /></div>
-              <button class="config-save" :disabled="!glmConfig.base_url || !glmConfig.api_key || configSaving" @click="saveGlmConfig">{{ configSaving ? '保存中...' : '💾 保存 GLM' }}</button>
+              <button class="config-save" :disabled="!glmConfig.base_url || !hasConfiguredApiKey('glm', glmConfig) || configSaving" @click="saveGlmConfig">{{ configSaving ? '保存中...' : '💾 保存 GLM' }}</button>
             </div>
             <div class="config-divider"></div>
             <div class="config-section">
@@ -936,7 +1084,7 @@ async function handleBubbleClick(e) {
               <div class="config-field"><label>API 地址</label><input v-model="grokConfig.base_url" type="text" placeholder="https://api.x.ai" /></div>
               <div class="config-field"><label>API Key</label><input v-model="grokConfig.api_key" type="password" placeholder="xai-..." /></div>
               <div class="config-field"><label>模型</label><input v-model="grokConfig.model" type="text" placeholder="grok-3" /></div>
-              <button class="config-save" :disabled="!grokConfig.base_url || !grokConfig.api_key || configSaving" @click="saveGrokConfig">{{ configSaving ? '保存中...' : '💾 保存 Grok' }}</button>
+              <button class="config-save" :disabled="!grokConfig.base_url || !hasConfiguredApiKey('grok', grokConfig) || configSaving" @click="saveGrokConfig">{{ configSaving ? '保存中...' : '💾 保存 Grok' }}</button>
             </div>
             <div class="config-divider"></div>
             <div class="config-section">
@@ -944,7 +1092,7 @@ async function handleBubbleClick(e) {
               <div class="config-field"><label>API 地址</label><input v-model="claudeConfig.base_url" type="text" placeholder="https://api.anthropic.com" /></div>
               <div class="config-field"><label>API Key</label><input v-model="claudeConfig.api_key" type="password" placeholder="sk-ant-..." /></div>
               <div class="config-field"><label>模型</label><input v-model="claudeConfig.model" type="text" placeholder="claude-sonnet-4-20250514" /></div>
-              <button class="config-save" :disabled="!claudeConfig.base_url || !claudeConfig.api_key || configSaving" @click="saveClaudeConfig">{{ configSaving ? '保存中...' : '💾 保存 Claude' }}</button>
+              <button class="config-save" :disabled="!claudeConfig.base_url || !hasConfiguredApiKey('claude', claudeConfig) || configSaving" @click="saveClaudeConfig">{{ configSaving ? '保存中...' : '💾 保存 Claude' }}</button>
             </div>
 
             <div class="config-divider"></div>
@@ -989,7 +1137,7 @@ async function handleBubbleClick(e) {
             <div class="msg-content-wrapper">
               <div class="msg-name" v-if="msg.role === 'assistant'">{{ { claude: 'Claude', codex: 'Codex', glm: 'GLM', grok: 'Grok' }[activeProvider] }}</div>
               <div class="msg-bubble">
-                <span class="msg-text" v-html="renderMarkdown(msg.content)"></span>
+                <span class="msg-text" v-html="renderSafeMarkdown(msg.content)"></span>
                 <span v-if="isLoading && i === currentMessages.length - 1 && msg.role === 'assistant'" class="msg-cursor">▊</span>
               </div>
             </div>
@@ -1009,13 +1157,13 @@ async function handleBubbleClick(e) {
             class="chat-input"
             placeholder="输入消息…"
             rows="1"
-            :disabled="isLoading"
+            :disabled="isLoading || creatingConversation"
             @keydown="handleKeydown"
           ></textarea>
           <button v-if="isLoading" class="chat-stop" @click="stopGeneration" title="停止生成">
             ⏹
           </button>
-          <button v-else class="chat-send" :disabled="!inputText.trim()" @click="sendMessage">
+          <button v-else class="chat-send" :disabled="!inputText.trim() || creatingConversation" @click="sendMessage">
             ➤
           </button>
         </div>
@@ -1024,124 +1172,6 @@ async function handleBubbleClick(e) {
   </Teleport>
 </template>
 
-<script>
-function renderMarkdown(text) {
-  if (!text) return ''
-
-  // 1. 代码块保护（先提取，防止内部被误处理）
-  const codeBlocks = []
-  text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    const escapedCode = code.replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    const safeCode = encodeURIComponent(code)
-    const copySvg = `<svg class="copy-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 5H6C4.89543 5 4 5.89543 4 7V19C4 20.1046 4.89543 21 6 21H16C17.1046 21 18 20.1046 18 19V17M8 5C8 6.10457 8.89543 7 10 7H12C13.1046 7 14 6.10457 14 5M8 5C8 3.89543 8.89543 3 10 3H12C13.1046 3 14 3.89543 14 5M14 5H16C17.1046 5 18 5.89543 18 7V10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="14" y="14" width="6" height="6" rx="1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-    
-    codeBlocks.push(`
-      <div class="code-block-wrapper">
-        <div class="code-block-header">
-          <span class="code-lang">${lang || ''}</span>
-          <button class="code-copy-btn" data-code="${safeCode}" title="复制代码">
-            ${copySvg}
-          </button>
-        </div>
-        <pre><code>${escapedCode}</code></pre>
-      </div>
-    `)
-    return `%%CODE_BLOCK_${codeBlocks.length - 1}%%`
-  })
-
-  // 2. 行内代码
-  text = text.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
-
-  // 3. 按行处理
-  const lines = text.split('\n')
-  const result = []
-  let inList = false
-  let listType = ''
-
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i]
-
-    // 代码块占位符直接输出
-    if (line.match(/%%CODE_BLOCK_\d+%%/)) {
-      if (inList) { result.push(listType === 'ul' ? '</ul>' : '</ol>'); inList = false }
-      result.push(line)
-      continue
-    }
-
-    // 分割线
-    if (/^---+$/.test(line.trim())) {
-      if (inList) { result.push(listType === 'ul' ? '</ul>' : '</ol>'); inList = false }
-      result.push('<hr class="md-hr">')
-      continue
-    }
-
-    // 独立图片行 ![alt](url)
-    const imgLine = line.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)$/)
-    if (imgLine) {
-      if (inList) { result.push(listType === 'ul' ? '</ul>' : '</ol>'); inList = false }
-      result.push(`<div class="md-img-wrap"><img src="${imgLine[2]}" alt="${imgLine[1]}" class="md-img" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" /><span class="md-img-error" style="display:none">⚠️ 图片加载失败</span></div>`)
-      continue
-    }
-
-    // 标题
-    const h3 = line.match(/^### (.+)/)
-    if (h3) { if (inList) { result.push(listType === 'ul' ? '</ul>' : '</ol>'); inList = false }; result.push(`<h4 class="md-h3">${applyInline(h3[1])}</h4>`); continue }
-    const h2 = line.match(/^## (.+)/)
-    if (h2) { if (inList) { result.push(listType === 'ul' ? '</ul>' : '</ol>'); inList = false }; result.push(`<h3 class="md-h2">${applyInline(h2[1])}</h3>`); continue }
-    const h1 = line.match(/^# (.+)/)
-    if (h1) { if (inList) { result.push(listType === 'ul' ? '</ul>' : '</ol>'); inList = false }; result.push(`<h2 class="md-h1">${applyInline(h1[1])}</h2>`); continue }
-
-    // 无序列表
-    const ul = line.match(/^[-*] (.+)/)
-    if (ul) {
-      if (!inList || listType !== 'ul') {
-        if (inList) result.push(listType === 'ul' ? '</ul>' : '</ol>')
-        result.push('<ul class="md-list">'); inList = true; listType = 'ul'
-      }
-      result.push(`<li>${applyInline(ul[1])}</li>`)
-      continue
-    }
-
-    // 有序列表
-    const ol = line.match(/^\d+\. (.+)/)
-    if (ol) {
-      if (!inList || listType !== 'ol') {
-        if (inList) result.push(listType === 'ul' ? '</ul>' : '</ol>')
-        result.push('<ol class="md-list">'); inList = true; listType = 'ol'
-      }
-      result.push(`<li>${applyInline(ol[1])}</li>`)
-      continue
-    }
-
-    // 关闭列表
-    if (inList && line.trim() === '') {
-      result.push(listType === 'ul' ? '</ul>' : '</ol>'); inList = false
-    }
-
-    // 普通段落
-    if (line.trim()) {
-      result.push(`<p class="md-p">${applyInline(line)}</p>`)
-    } else if (!inList) {
-      result.push('')
-    }
-  }
-  if (inList) result.push(listType === 'ul' ? '</ul>' : '</ol>')
-
-  // 4. 还原代码块
-  let html = result.join('\n')
-  codeBlocks.forEach((block, i) => {
-    html = html.replace(`%%CODE_BLOCK_${i}%%`, block)
-  })
-  return html
-}
-
-function applyInline(text) {
-  return text
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="md-img-inline" loading="lazy" />')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-}
-</script>
 
 <style scoped>
 /* ===== 悬浮气泡 ===== */

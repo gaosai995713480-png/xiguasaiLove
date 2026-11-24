@@ -1,21 +1,35 @@
+import secrets
+import time
+
+import pytest
 from fastapi.testclient import TestClient
 
-from backend.database import get_config, set_config
-from backend.dependencies import SESSION_COOKIE_NAME, UserInfo, create_session
+from backend.dependencies import SESSION_COOKIE_NAME, UserInfo, _cache_session
 from backend.main import app
+from backend.routers import config as config_router
+from backend.tripstar import config as tripstar_config
 
 
 client = TestClient(app)
 
 
+@pytest.fixture
+def isolated_config_store(monkeypatch):
+    store = {}
+    monkeypatch.setattr(config_router, "set_config", lambda key, value: store.__setitem__(key, value))
+    monkeypatch.setattr(config_router, "get_all_configs", lambda: dict(store))
+    return store
+
+
 def _client_with_role(role: str) -> TestClient:
     local_client = TestClient(app)
-    token = create_session(UserInfo(username=f"{role}_tester", role=role))
+    token = secrets.token_urlsafe(24)
+    _cache_session(token, UserInfo(username=f"{role}_tester", role=role), time.time() + 3600)
     local_client.cookies.set(SESSION_COOKIE_NAME, token)
     return local_client
 
 
-def test_admin_can_upsert_generic_config_key_to_love_config():
+def test_admin_can_upsert_generic_config_key_to_love_config(isolated_config_store):
     admin_client = _client_with_role("admin")
 
     response = admin_client.post(
@@ -28,7 +42,7 @@ def test_admin_can_upsert_generic_config_key_to_love_config():
 
     assert response.status_code == 200
     assert response.json() == {"ok": True, "key": "TRIPSTAR_TEST_KEY"}
-    assert get_config("TRIPSTAR_TEST_KEY") == "unit-test-value"
+    assert isolated_config_store["TRIPSTAR_TEST_KEY"] == "unit-test-value"
 
 
 def test_non_admin_cannot_upsert_generic_config_key():
@@ -45,7 +59,7 @@ def test_non_admin_cannot_upsert_generic_config_key():
     assert response.status_code == 403
 
 
-def test_config_key_list_masks_values_for_admin():
+def test_config_key_list_masks_values_for_admin(isolated_config_store):
     admin_client = _client_with_role("admin")
     admin_client.post(
         "/api/config/keys",
@@ -63,13 +77,17 @@ def test_config_key_list_masks_values_for_admin():
     assert item["masked_value"].endswith("cdef")
 
 
-def test_tripstar_map_config_reads_frontend_keys_from_love_config_without_leaking_web_key():
-    set_config("TRIPSTAR_AMAP_WEB_KEY", "backend-web-key")
-    set_config("VITE_TRIPSTAR_AMAP_WEB_JS_KEY", "frontend-js-key")
-    set_config("VITE_TRIPSTAR_AMAP_SECURITY_JS_CODE", "frontend-security-code")
+def test_tripstar_map_config_reads_frontend_keys_from_love_config_without_leaking_web_key(monkeypatch):
+    values = {
+        "TRIPSTAR_AMAP_WEB_KEY": "backend-web-key",
+        "VITE_TRIPSTAR_AMAP_WEB_JS_KEY": "real-js-key",
+        "VITE_TRIPSTAR_AMAP_SECURITY_JS_CODE": "real-security-code",
+    }
+    monkeypatch.setattr(tripstar_config, "_db_config", lambda name: values.get(name, ""))
+    authed = _client_with_role("visitor")
 
-    health_response = client.get("/api/tripstar/health")
-    map_response = client.get("/api/tripstar/map/config")
+    health_response = authed.get("/api/tripstar/health")
+    map_response = authed.get("/api/tripstar/map/config")
 
     assert health_response.status_code == 200
     assert health_response.json()["amap_configured"] is True
@@ -77,6 +95,6 @@ def test_tripstar_map_config_reads_frontend_keys_from_love_config_without_leakin
     assert map_response.status_code == 200
     payload = map_response.json()
     assert payload["configured"] is True
-    assert payload["amap_web_js_key"] == "frontend-js-key"
-    assert payload["amap_security_js_code"] == "frontend-security-code"
+    assert payload["amap_web_js_key"] == "real-js-key"
+    assert payload["amap_security_js_code"] == "real-security-code"
     assert "backend-web-key" not in str(payload)

@@ -1,9 +1,10 @@
 """AI 聊天路由 — 多供应商独立架构"""
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 from typing import Optional
 
 from ..database import get_config, set_config, get_db
@@ -32,6 +33,9 @@ logger = logging.getLogger(__name__)
 
 # 记忆提取后台任务引用：asyncio.create_task 若不持有引用，任务可能被 GC 中断
 _memory_tasks: set = set()
+_MAX_CHAT_HISTORY = 100
+_MAX_CHAT_CONTENT = 50000
+_MAX_CLIENT_CONTEXT = 4000
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -39,17 +43,17 @@ router = APIRouter(prefix="/api/ai", tags=["ai"])
 # ==================== 请求模型 ====================
 
 class ChatMessage(BaseModel):
-    role: str = "user"
-    content: str = ""
+    role: str = Field(default="user", pattern="^(user|assistant|system)$")
+    content: str = Field(default="", max_length=_MAX_CHAT_CONTENT)
 
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=10000)
-    history: list[ChatMessage] = Field(default_factory=list)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=_MAX_CHAT_HISTORY)
     provider: str = Field(default="codex", pattern="^(claude|codex|glm|grok)$")
     skill_id: Optional[int] = Field(default=None)
     conversation_id: Optional[int] = Field(default=None)
-    client_context: Optional[str] = Field(default=None)
+    client_context: Optional[str] = Field(default=None, max_length=_MAX_CLIENT_CONTEXT)
 
 
 # ==================== SSE 生成器 ====================
@@ -59,7 +63,7 @@ import json
 async def _sse_generator(provider_name: str, messages: list[dict]):
     """将 Provider 的流式输出包装为 SSE 格式，Codex/Claude 走 Agent Loop"""
     try:
-        provider = get_provider(provider_name)
+        provider = await run_in_threadpool(get_provider, provider_name)
         if not provider.is_available():
             labels = {"claude": "Claude API", "codex": "Codex API", "glm": "GLM API", "grok": "Grok API"}
             label = labels.get(provider_name, provider_name)
@@ -71,10 +75,10 @@ async def _sse_generator(provider_name: str, messages: list[dict]):
         if provider_name in ("codex", "claude"):
             from ..services.agent_loop import codex_agent_loop, claude_agent_loop
             if provider_name == "codex":
-                cfg = get_codex_config()
+                cfg = await run_in_threadpool(get_codex_config)
                 gen = codex_agent_loop(cfg["base_url"], cfg["api_key"], cfg["model"], messages)
             else:
-                cfg = get_claude_config()
+                cfg = await run_in_threadpool(get_claude_config)
                 gen = claude_agent_loop(cfg["base_url"], cfg["api_key"], cfg["model"], messages)
 
             async for chunk in gen:
@@ -91,10 +95,25 @@ async def _sse_generator(provider_name: str, messages: list[dict]):
         yield f"data: {json.dumps('[错误] ' + str(e))}\n\n"
 
 
+def _load_skill_prompt(skill_id: int, username: str) -> str:
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT system_prompt FROM ai_skill_presets WHERE id = %s AND username = %s",
+                    (skill_id, username),
+                )
+                row = cur.fetchone()
+                return str(row[0]) if row and row[0] else ""
+    except Exception as e:
+        logger.warning("查询 Skill 失败: %s", e)
+        return ""
+
+
 # ==================== 路由 ====================
 
 @router.get("/status")
-def ai_status():
+def ai_status(_=Depends(require_auth)):
     """检查各供应商的可用状态"""
     claude_provider = get_provider("claude")
     codex_provider = get_provider("codex")
@@ -128,6 +147,21 @@ def ai_status():
     }
 
 
+def _provider_config_updates(body: dict, key_map: dict[str, str]) -> dict[str, str]:
+    updates: dict[str, str] = {}
+    for field, config_key in key_map.items():
+        if field not in body:
+            continue
+        value = "" if body[field] is None else str(body[field]).strip()
+        if field == "api_key":
+            if not value:
+                continue
+        elif not value:
+            raise HTTPException(status_code=400, detail=f"{field} 不能为空")
+        updates[config_key] = value
+    return updates
+
+
 @router.post("/chat")
 async def ai_chat(req: ChatRequest, request: Request, _=Depends(require_auth)):
     """AI 聊天 — 返回 SSE 流式响应（支持 Agent 工具调用 + 长期记忆）"""
@@ -155,24 +189,15 @@ async def ai_chat(req: ChatRequest, request: Request, _=Depends(require_auth)):
 
     # 2. 注入长期记忆
     if username:
-        memory_prompt = build_memory_prompt(username)
+        memory_prompt = await run_in_threadpool(build_memory_prompt, username)
         if memory_prompt:
             messages.append({"role": "system", "content": memory_prompt})
 
     # 3. 注入技能预设的 system prompt
     if req.skill_id and user:
-        try:
-            with get_db() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT system_prompt FROM ai_skill_presets WHERE id = %s AND username = %s",
-                        (req.skill_id, user.username),
-                    )
-                    row = cur.fetchone()
-                    if row and row[0]:
-                        messages.append({"role": "system", "content": row[0]})
-        except Exception as e:
-            logger.warning("查询 Skill 失败: %s", e)
+        skill_prompt = await run_in_threadpool(_load_skill_prompt, req.skill_id, user.username)
+        if skill_prompt:
+            messages.append({"role": "system", "content": skill_prompt})
 
     # 4. 注入全局安全护栏 (非 admin 限制)
     if not user or user.role != "admin":
@@ -244,19 +269,15 @@ def claude_config(_=Depends(require_role("admin"))):
 
 @router.post("/config/claude")
 def update_claude_config(body: dict, _=Depends(require_role("admin"))):
-    updated = 0
     key_map = {
         "base_url": CLAUDE_BASE_URL_KEY,
         "api_key": CLAUDE_API_KEY_KEY,
         "model": CLAUDE_MODEL_KEY,
     }
-    for field, config_key in key_map.items():
-        if field in body:
-            value = str(body[field]).strip()
-            if value:
-                set_config(config_key, value)
-                updated += 1
-    return {"ok": True, "updated": updated}
+    updates = _provider_config_updates(body, key_map)
+    for config_key, value in updates.items():
+        set_config(config_key, value)
+    return {"ok": True, "updated": len(updates), "updated_keys": sorted(updates)}
 
 
 # ==================== Codex 配置 ====================
@@ -278,19 +299,15 @@ def codex_config(_=Depends(require_role("admin"))):
 
 @router.post("/config/codex")
 def update_codex_config(body: dict, _=Depends(require_role("admin"))):
-    updated = 0
     key_map = {
         "base_url": CODEX_BASE_URL_KEY,
         "api_key": CODEX_API_KEY_KEY,
         "model": CODEX_MODEL_KEY,
     }
-    for field, config_key in key_map.items():
-        if field in body:
-            value = str(body[field]).strip()
-            if value:
-                set_config(config_key, value)
-                updated += 1
-    return {"ok": True, "updated": updated}
+    updates = _provider_config_updates(body, key_map)
+    for config_key, value in updates.items():
+        set_config(config_key, value)
+    return {"ok": True, "updated": len(updates), "updated_keys": sorted(updates)}
 
 
 # ==================== GLM 配置 ====================
@@ -312,19 +329,15 @@ def glm_config(_=Depends(require_role("admin"))):
 
 @router.post("/config/glm")
 def update_glm_config(body: dict, _=Depends(require_role("admin"))):
-    updated = 0
     key_map = {
         "base_url": GLM_BASE_URL_KEY,
         "api_key": GLM_API_KEY_KEY,
         "model": GLM_MODEL_KEY,
     }
-    for field, config_key in key_map.items():
-        if field in body:
-            value = str(body[field]).strip()
-            if value:
-                set_config(config_key, value)
-                updated += 1
-    return {"ok": True, "updated": updated}
+    updates = _provider_config_updates(body, key_map)
+    for config_key, value in updates.items():
+        set_config(config_key, value)
+    return {"ok": True, "updated": len(updates), "updated_keys": sorted(updates)}
 
 
 # ==================== Grok 配置 ====================
@@ -346,19 +359,15 @@ def grok_config(_=Depends(require_role("admin"))):
 
 @router.post("/config/grok")
 def update_grok_config(body: dict, _=Depends(require_role("admin"))):
-    updated = 0
     key_map = {
         "base_url": GROK_BASE_URL_KEY,
         "api_key": GROK_API_KEY_KEY,
         "model": GROK_MODEL_KEY,
     }
-    for field, config_key in key_map.items():
-        if field in body:
-            value = str(body[field]).strip()
-            if value:
-                set_config(config_key, value)
-                updated += 1
-    return {"ok": True, "updated": updated}
+    updates = _provider_config_updates(body, key_map)
+    for config_key, value in updates.items():
+        set_config(config_key, value)
+    return {"ok": True, "updated": len(updates), "updated_keys": sorted(updates)}
 
 
 # ==================== Agent 配置 ====================

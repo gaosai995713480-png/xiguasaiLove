@@ -228,7 +228,7 @@ onMounted(() => musicStore.loadSongs())
 
 <template>
   <TopBar title="🎵 音乐时光" @back="router.push('/')">
-    <button class="btn-icon setting-btn" @click="openCookieModal" title="Cookie 设置">⚙️</button>
+    <button v-if="authStore.isAdmin" class="btn-icon setting-btn" @click="openCookieModal" title="Cookie 设置">⚙️</button>
     <button v-if="authStore.isAdmin" class="btn-icon setting-btn" @click="openBgmModal" title="首页背景音乐">🏠</button>
     <button class="btn-primary add-btn" @click="showAddModal = true">+ 添加歌曲</button>
   </TopBar>

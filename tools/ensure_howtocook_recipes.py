@@ -50,7 +50,7 @@ def main() -> int:
         f"skipped={import_result.skipped_count}, failed={import_result.failed_count}, "
         f"source_commit={result.source_commit}"
     )
-    return 1 if import_result.status == "failed" else 0
+    return 1 if import_result.status in {"failed", "partial"} else 0
 
 
 if __name__ == "__main__":

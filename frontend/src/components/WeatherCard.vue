@@ -24,6 +24,10 @@ const weatherError = ref(null)
 let searchTimer = null
 const WEATHER_REFRESH_MS = 30 * 60 * 1000
 let weatherRefreshTimer = null
+let weatherRequestId = 0
+let searchRequestId = 0
+let districtRequestId = 0
+let viewActive = false
 
 function weatherIcon(weather) {
   const map = {
@@ -64,6 +68,7 @@ async function autoLocate() {
 }
 
 async function loadWeather(adcode) {
+  const requestId = ++weatherRequestId
   const code = adcode || weatherCity.value || DEFAULT_ADCODE
   weatherLoading.value = true
   weatherError.value = null
@@ -72,37 +77,55 @@ async function loadWeather(adcode) {
       weatherApi.weather(code, 'base'),
       weatherApi.weather(code, 'all'),
     ])
+    if (requestId !== weatherRequestId) return
     const baseData = results[0].status === 'fulfilled' ? results[0].value : {}
     const allData = results[1].status === 'fulfilled' ? results[1].value : {}
     if (baseData.status === '1' && baseData.lives?.length > 0) {
       weatherData.value = baseData.lives[0]
+    } else {
+      weatherData.value = null
     }
     if (allData.status === '1' && allData.forecasts?.length > 0) {
       forecastData.value = allData.forecasts[0].casts || []
-      if (weatherData.value && !weatherData.value.city && allData.forecasts[0].city) {
-        weatherData.value.city = allData.forecasts[0].city
+      const forecastCity = allData.forecasts[0].city
+      if (weatherData.value && !weatherData.value.city && forecastCity) {
+        weatherData.value.city = forecastCity
       }
+    } else {
+      forecastData.value = []
     }
     if (!weatherData.value) {
-      weatherError.value = baseData.info || '天气加载失败'
+      const networkFailed = results.every((result) => result.status === 'rejected')
+      weatherError.value = networkFailed
+        ? '网络错误，无法加载天气'
+        : baseData.info || '天气加载失败'
     }
-  } catch (e) {
+  } catch {
+    if (requestId !== weatherRequestId) return
+    weatherData.value = null
+    forecastData.value = []
     weatherError.value = '网络错误，无法加载天气'
   } finally {
-    weatherLoading.value = false
+    if (requestId === weatherRequestId) weatherLoading.value = false
   }
 }
 
 function onCitySearch(keyword) {
   clearTimeout(searchTimer)
+  const requestId = ++searchRequestId
   if (!keyword.trim()) { citySearchResults.value = []; return }
   searchTimer = setTimeout(async () => {
     try {
       const data = await weatherApi.district(keyword, 0)
+      if (requestId !== searchRequestId) return
       if (data.status === '1') {
         citySearchResults.value = data.districts || []
+      } else {
+        citySearchResults.value = []
       }
-    } catch { /* toast handled by API layer */ }
+    } catch {
+      if (requestId === searchRequestId) citySearchResults.value = []
+    }
   }, 300)
 }
 
@@ -116,14 +139,21 @@ function selectCity(district) {
 }
 
 async function loadDistricts(keyword = '中国') {
+  const requestId = ++districtRequestId
   districtLoading.value = true
   try {
     const data = await weatherApi.district(keyword, 1)
+    if (requestId !== districtRequestId) return
     if (data.status === '1' && data.districts?.length > 0) {
       districtList.value = data.districts[0].districts || []
+    } else {
+      districtList.value = []
     }
-  } catch { /* toast handled by API layer */ }
-  districtLoading.value = false
+  } catch {
+    if (requestId === districtRequestId) districtList.value = []
+  } finally {
+    if (requestId === districtRequestId) districtLoading.value = false
+  }
 }
 
 function drillDown(district) {
@@ -176,22 +206,28 @@ function closeCitySearch(e) {
 }
 
 function cleanup() {
+  weatherRequestId += 1
+  searchRequestId += 1
+  districtRequestId += 1
   if (weatherRefreshTimer) clearInterval(weatherRefreshTimer)
   if (searchTimer) clearTimeout(searchTimer)
 }
 
-defineExpose({ cleanup })
+defineExpose({ cleanup, loadWeather })
 
 onMounted(async () => {
+  viewActive = true
   document.addEventListener('click', closeCitySearch)
   if (!weatherCity.value) {
     await autoLocate()
   }
+  if (!viewActive) return
   loadWeather()
   weatherRefreshTimer = setInterval(() => loadWeather(), WEATHER_REFRESH_MS)
 })
 
 onUnmounted(() => {
+  viewActive = false
   document.removeEventListener('click', closeCitySearch)
   cleanup()
 })

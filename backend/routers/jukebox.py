@@ -1,41 +1,31 @@
-"""点歌台路由 — 访客推荐歌曲"""
-import time
-from collections import defaultdict
+"""点歌台路由 — 登录用户推荐歌曲"""
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
 from ..database import get_db
 from ..config import settings
 from ..dependencies import require_auth, require_role
+from ..security import SlidingWindowLimiter, get_client_ip
 from ..services.meting import MUSIC_PLATFORMS
 
 router = APIRouter(prefix="/api", tags=["jukebox"])
 
-# IP 限频：{ip: [timestamp, ...]}
-_ip_timestamps: dict[str, list[float]] = defaultdict(list)
 _RATE_LIMIT = 5        # 每小时最多推荐次数
 _RATE_WINDOW = 3600     # 窗口（秒）
+_rate_limiter = SlidingWindowLimiter(_RATE_LIMIT, _RATE_WINDOW)
 
 
 def _check_rate_limit(ip: str) -> bool:
-    """检查 IP 是否超过限频，返回 True 表示允许"""
-    now = time.time()
-    timestamps = _ip_timestamps[ip]
-    # 清理过期记录
-    _ip_timestamps[ip] = [t for t in timestamps if now - t < _RATE_WINDOW]
-    return len(_ip_timestamps[ip]) < _RATE_LIMIT
+    """原子检查并记录一次推荐请求。"""
+    return _rate_limiter.allow(ip)
 
 
 def _get_client_ip(request: Request) -> str:
-    """获取客户端真实 IP"""
-    return (
-        request.headers.get("X-Real-IP")
-        or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        or request.client.host
-    )
+    """获取客户端 IP；代理头仅在 TRUST_PROXY_HEADERS 开启时使用。"""
+    return get_client_ip(request)[:45]
 
 
 @router.get("/jukebox")
-def list_requests(limit: int = 50):
+def list_requests(limit: int = 50, _=Depends(require_auth)):
     limit = max(1, min(limit, 100))
     table = settings.song_request_table
     with get_db() as conn:
@@ -59,7 +49,7 @@ def list_requests(limit: int = 50):
 
 
 @router.post("/jukebox")
-def create_request(body: dict, request: Request):
+def create_request(body: dict, request: Request, _=Depends(require_auth)):
     song_id = str(body.get("song_id", "")).strip()
     song_name = str(body.get("song_name", "")).strip()
     artist = str(body.get("artist", "")).strip()
@@ -68,7 +58,9 @@ def create_request(body: dict, request: Request):
     message = str(body.get("message", "")).strip()
 
     if not song_id or not song_name:
-        return {"error": "song_id and song_name are required"}, 400
+        return JSONResponse({"error": "song_id and song_name are required"}, status_code=400)
+    if len(song_id) > 20:
+        return JSONResponse({"error": "song_id 过长"}, status_code=400)
     if platform not in MUSIC_PLATFORMS:
         return JSONResponse({"error": "目前仅支持网易云音乐"}, status_code=400)
 
@@ -81,7 +73,10 @@ def create_request(body: dict, request: Request):
     client_ip = _get_client_ip(request)
 
     if not _check_rate_limit(client_ip):
-        return {"error": "推荐太频繁，请稍后再试", "rate_limited": True}
+        return JSONResponse(
+            {"error": "推荐太频繁，请稍后再试", "rate_limited": True},
+            status_code=429,
+        )
 
     table = settings.song_request_table
     with get_db() as conn:
@@ -95,18 +90,17 @@ def create_request(body: dict, request: Request):
             row_id = cursor.lastrowid
         conn.commit()
 
-    _ip_timestamps[client_ip].append(time.time())
     return {"ok": True, "id": row_id}
 
 
 @router.post("/jukebox/like")
-def like_request(body: dict, request: Request):
+def like_request(body: dict, request: Request, _=Depends(require_auth)):
     try:
         request_id = int(body.get("id", 0))
     except (ValueError, TypeError):
         request_id = 0
     if request_id <= 0:
-        return {"error": "invalid id"}, 400
+        return JSONResponse({"error": "invalid id"}, status_code=400)
 
     client_ip = _get_client_ip(request)
     table = settings.song_request_table
@@ -114,6 +108,12 @@ def like_request(body: dict, request: Request):
 
     with get_db() as conn:
         with conn.cursor() as cursor:
+            cursor.execute(
+                f"SELECT id FROM `{table}` WHERE id = %s",
+                (request_id,),
+            )
+            if not cursor.fetchone():
+                return JSONResponse({"error": "not found"}, status_code=404)
             cursor.execute(
                 f"INSERT IGNORE INTO `{like_table}` (request_id, ip) VALUES (%s, %s)",
                 (request_id, client_ip),
@@ -151,21 +151,21 @@ def adopt_request(body: dict, _=Depends(require_role("admin"))):
     except (ValueError, TypeError):
         request_id = 0
     if request_id <= 0:
-        return {"error": "invalid id"}, 400
+        return JSONResponse({"error": "invalid id"}, status_code=400)
 
     table = settings.song_request_table
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 f"SELECT song_id, song_name, artist, platform, is_adopted "
-                f"FROM `{table}` WHERE id = %s",
+                f"FROM `{table}` WHERE id = %s FOR UPDATE",
                 (request_id,),
             )
             row = cursor.fetchone()
             if not row:
-                return {"error": "not found"}, 404
+                return JSONResponse({"error": "not found"}, status_code=404)
             if row[4]:
-                return {"error": "already adopted"}
+                return JSONResponse({"error": "already adopted"}, status_code=409)
 
             # 插入到歌单
             cursor.execute(
@@ -185,7 +185,7 @@ def adopt_request(body: dict, _=Depends(require_role("admin"))):
 @router.delete("/jukebox")
 def delete_request(id: int, _=Depends(require_role("admin"))):
     if id <= 0:
-        return {"error": "invalid id"}, 400
+        return JSONResponse({"error": "invalid id"}, status_code=400)
 
     table = settings.song_request_table
     like_table = f"{table}_likes"
@@ -202,5 +202,5 @@ def delete_request(id: int, _=Depends(require_role("admin"))):
             affected = cursor.rowcount
         conn.commit()
     if not affected:
-        return {"error": "not found"}, 404
+        return JSONResponse({"error": "not found"}, status_code=404)
     return {"ok": True}

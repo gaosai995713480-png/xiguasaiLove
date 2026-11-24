@@ -1,6 +1,6 @@
 """AI 对话会话管理路由 — 持久化对话历史"""
 import logging
-from fastapi import APIRouter, Depends, Request, Query
+from fastapi import APIRouter, Body, Depends, Request, Query
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -25,7 +25,7 @@ class TitleUpdate(BaseModel):
 
 class MessageSave(BaseModel):
     role: str = Field(..., pattern="^(user|assistant|system)$")
-    content: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1, max_length=50000)
 
 
 # ==================== 路由 ====================
@@ -135,7 +135,12 @@ def update_title(conv_id: int, body: TitleUpdate, request: Request, _=Depends(re
 
 
 @router.post("/{conv_id}/messages")
-def save_messages(conv_id: int, messages: list[MessageSave], request: Request, _=Depends(require_auth)):
+def save_messages(
+    conv_id: int,
+    request: Request,
+    messages: list[MessageSave] = Body(..., min_length=1, max_length=20),
+    _=Depends(require_auth),
+):
     """批量保存消息到指定会话（前端在 SSE 结束后调用）"""
     user = get_current_user(request)
     with get_db() as conn:

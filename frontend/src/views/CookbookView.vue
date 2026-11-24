@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { cookingApi, recipeApi } from '../api'
+import { todayInShanghai } from '../utils/dayDate'
 
 const router = useRouter()
 
@@ -26,7 +27,7 @@ const filters = ref({
 })
 
 const recordForm = ref({
-  cooked_date: new Date().toISOString().slice(0, 10),
+  cooked_date: todayInShanghai(),
   rating: 5,
   mood: '',
   note: '',
@@ -81,19 +82,13 @@ async function openRecipe(recipe) {
 async function toggleFavorite(recipe) {
   await recipeApi.updateState(recipe.id, {
     is_favorite: !recipe.is_favorite,
-    want_to_cook: recipe.want_to_cook,
-    rating: recipe.rating,
-    note: '',
   })
   await loadRecipes()
 }
 
 async function toggleWantToCook(recipe) {
   await recipeApi.updateState(recipe.id, {
-    is_favorite: recipe.is_favorite,
     want_to_cook: !recipe.want_to_cook,
-    rating: recipe.rating,
-    note: '',
   })
   await loadRecipes()
 }

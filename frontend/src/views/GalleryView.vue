@@ -147,15 +147,22 @@ async function handleUpload(e) {
   if (!files || !files.length) return
   uploading.value = true
   actionError.value = ''
+  let uploadedAny = false
+  let uploadError = ''
   try {
     for (const file of files) {
-      await photoApi.upload(file, file.name)
+      try {
+        await photoApi.upload(file, file.name)
+        uploadedAny = true
+      } catch (error) {
+        uploadError = error?.message || '上传失败'
+        break
+      }
     }
-    await loadPhotos()
-  } catch (e) {
-    actionError.value = e?.message || '上传失败'
+    if (uploadedAny) await loadPhotos()
   }
   finally {
+    if (uploadError) actionError.value = uploadError
     uploading.value = false
     if (uploadInput.value) uploadInput.value.value = ''
   }

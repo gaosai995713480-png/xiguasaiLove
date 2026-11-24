@@ -297,15 +297,41 @@ def update_recipe_state(
     recipe_id: int, body: dict, request: Request, _=Depends(require_auth)
 ):
     username = _current_username(request)
-    rating = body.get("rating")
-    if rating is not None:
-        rating = int(rating)
+    if "rating" in body and body.get("rating") is not None:
+        try:
+            rating = int(body["rating"])
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="评分必须是 1-5 的整数") from exc
         if rating < 1 or rating > 5:
             raise HTTPException(status_code=400, detail="评分必须在1-5之间")
-    note = str(body.get("note", ""))[:500]
+    else:
+        rating = None
     with get_db() as conn:
         with conn.cursor() as cursor:
             _ensure_recipe_exists(cursor, recipe_id)
+            cursor.execute(
+                """
+                SELECT is_favorite, want_to_cook, rating, note
+                FROM `love_recipe_user_states`
+                WHERE recipe_id = %s AND username = %s
+                """,
+                (recipe_id, username),
+            )
+            state = cursor.fetchone()
+            current_favorite = bool(state[0]) if state else False
+            current_want = bool(state[1]) if state else False
+            current_rating = state[2] if state else None
+            current_note = state[3] if state and state[3] is not None else ""
+
+            if "is_favorite" in body:
+                current_favorite = bool(body.get("is_favorite"))
+            if "want_to_cook" in body:
+                current_want = bool(body.get("want_to_cook"))
+            if rating is None:
+                rating = current_rating
+            if "note" in body:
+                current_note = "" if body.get("note") is None else str(body["note"])
+            current_note = current_note[:500]
             cursor.execute(
                 """
                 INSERT INTO `love_recipe_user_states`
@@ -320,10 +346,10 @@ def update_recipe_state(
                 (
                     recipe_id,
                     username,
-                    1 if body.get("is_favorite") else 0,
-                    1 if body.get("want_to_cook") else 0,
+                    1 if current_favorite else 0,
+                    1 if current_want else 0,
                     rating,
-                    note,
+                    current_note,
                 ),
             )
         conn.commit()
@@ -338,7 +364,10 @@ def add_cooking_record(
     cooked_date = str(body.get("cooked_date", "")).strip() or date.today().isoformat()
     rating = body.get("rating")
     if rating is not None:
-        rating = int(rating)
+        try:
+            rating = int(rating)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="评分必须是 1-5 的整数") from exc
         if rating < 1 or rating > 5:
             raise HTTPException(status_code=400, detail="评分必须在1-5之间")
     mood = str(body.get("mood", ""))[:30]
@@ -368,6 +397,16 @@ def add_cooking_record(
             record_id = cursor.lastrowid
             cursor.execute(
                 """
+                SELECT rating FROM `love_recipe_user_states`
+                WHERE recipe_id = %s AND username = %s
+                """,
+                (recipe_id, username),
+            )
+            state_row = cursor.fetchone()
+            state_rating = state_row[0] if state_row else None
+            effective_rating = rating if rating is not None else state_rating
+            cursor.execute(
+                """
                 INSERT INTO `love_recipe_user_states`
                     (recipe_id, username, cooked_count, last_cooked_at, rating, want_to_cook)
                 VALUES (%s, %s, 1, %s, %s, 0)
@@ -377,7 +416,7 @@ def add_cooking_record(
                     rating = VALUES(rating),
                     want_to_cook = 0
                 """,
-                (recipe_id, username, cooked_date, rating),
+                (recipe_id, username, cooked_date, effective_rating),
             )
         conn.commit()
     return {"ok": True, "id": record_id}

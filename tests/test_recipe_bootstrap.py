@@ -24,6 +24,7 @@ class FakeCursor:
     def execute(self, sql, params=None):
         normalized = " ".join(str(sql).split())
         self.executed.append((normalized, params))
+        self._fetchone = None
         if normalized.startswith("SELECT COUNT(*) FROM `love_recipes`"):
             self._fetchone = (self.recipe_count,)
 

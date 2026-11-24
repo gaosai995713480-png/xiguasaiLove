@@ -1,7 +1,7 @@
 """快递物流查询路由"""
 from fastapi import APIRouter, Depends
 from ..database import get_config, set_config
-from ..dependencies import require_role
+from ..dependencies import require_auth, require_role
 from ..services.kuaidi100 import query_express, detect_company, COMPANY_LIST
 
 router = APIRouter(prefix="/api", tags=["express"])
@@ -19,7 +19,7 @@ def _normalize_config_value(value) -> str:
 
 
 @router.get("/express/query")
-def express_query(num: str, com: str, phone: str = ""):
+def express_query(num: str, com: str, phone: str = "", _=Depends(require_auth)):
     """查询快递物流信息"""
     if not num or not com:
         return {"status": "error", "message": "快递单号和快递公司不能为空"}
@@ -36,7 +36,7 @@ def express_query(num: str, com: str, phone: str = ""):
 
 
 @router.get("/express/detect")
-def express_detect(num: str):
+def express_detect(num: str, _=Depends(require_auth)):
     """根据单号自动识别快递公司"""
     if not num:
         return {"auto": []}
@@ -45,7 +45,7 @@ def express_detect(num: str):
 
 
 @router.get("/express/companies")
-def express_companies():
+def express_companies(_=Depends(require_auth)):
     """获取常用快递公司列表"""
     return {"companies": COMPANY_LIST}
 

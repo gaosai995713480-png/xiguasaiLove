@@ -1,5 +1,7 @@
 """某一天聚合接口"""
 import datetime
+import secrets
+import time
 import os
 import sys
 from contextlib import contextmanager
@@ -14,7 +16,7 @@ from backend.dependencies import (
     SESSION_COOKIE_NAME,
     UserInfo,
     _sessions,
-    create_session,
+    _cache_session,
 )
 from backend.routers import day as day_router
 
@@ -83,8 +85,11 @@ class FakeConnection:
 
 
 def login_as(role: str = "visitor", gallery_unlocked: bool = False) -> str:
-    token = create_session(
-        UserInfo(username=f"{role}_user", role=role, gallery_unlocked=gallery_unlocked)
+    token = secrets.token_urlsafe(16)
+    _cache_session(
+        token,
+        UserInfo(username=f"{role}_user", role=role, gallery_unlocked=gallery_unlocked),
+        time.time() + 3600,
     )
     client.cookies.set(SESSION_COOKIE_NAME, token)
     return token
@@ -256,6 +261,18 @@ def test_admin_can_toggle_random_memory(monkeypatch):
     monkeypatch.setattr(day_router, "set_config", fake_set)
 
     response = client.put("/api/memory", json={"enabled": False})
+
+    assert response.status_code == 200
+    assert response.json() == {"enabled": False}
+    assert saved[day_router.MEMORY_CONFIG_KEY] == "off"
+
+
+def test_admin_toggle_rejects_string_boolean_ambiguity(monkeypatch):
+    login_as("admin")
+    saved = {}
+    monkeypatch.setattr(day_router, "set_config", lambda key, value: saved.__setitem__(key, value))
+
+    response = client.put("/api/memory", json={"enabled": "false"})
 
     assert response.status_code == 200
     assert response.json() == {"enabled": False}

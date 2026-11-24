@@ -83,4 +83,37 @@ describe('GalleryView', () => {
     expect(mockList).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('上传失败')
   })
+
+  it('批量上传部分成功时刷新已上传照片', async () => {
+    mockUpload
+      .mockResolvedValueOnce({ ok: true, saved: 1, name: 'ok.jpg' })
+      .mockRejectedValueOnce(new Error('第二张失败'))
+
+    const { default: GalleryView } = await import('../views/GalleryView.vue')
+    const wrapper = mount(GalleryView, {
+      global: {
+        stubs: {
+          TopBar: { template: '<div><slot /></div>' },
+          Teleport: true,
+        },
+      },
+    })
+    await flushPromises()
+    expect(mockList).toHaveBeenCalledTimes(1)
+
+    const uploadInput = wrapper.find('input[accept="image/*"]')
+    Object.defineProperty(uploadInput.element, 'files', {
+      value: [
+        new File(['ok'], 'ok.jpg', { type: 'image/jpeg' }),
+        new File(['bad'], 'bad.jpg', { type: 'image/jpeg' }),
+      ],
+      configurable: true,
+    })
+    await uploadInput.trigger('change')
+    await flushPromises()
+
+    expect(mockUpload).toHaveBeenCalledTimes(2)
+    expect(mockList).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('第二张失败')
+  })
 })

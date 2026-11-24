@@ -37,17 +37,31 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout() {
-    // 清空 AI 聊天缓存
     try {
-      const keys = Object.keys(localStorage).filter(k => k.startsWith('ai_chat_'))
-      keys.forEach(k => localStorage.removeItem(k))
-    } catch { /* ignore */ }
+      await authApi.logout()
+    } catch (error) {
+      // 网络失败也必须完成本地退出，避免用户被困在已登录界面。
+      console.warn('退出登录请求失败，继续清理本地会话', error)
+    } finally {
+      try {
+        const localKeys = Object.keys(localStorage).filter(
+          (key) => key.startsWith('ai_chat_') || key.startsWith('ai_active_skills_'),
+        )
+        localKeys.forEach((key) => localStorage.removeItem(key))
+        localStorage.removeItem('express_history')
+      } catch { /* ignore */ }
 
-    await authApi.logout()
-    useMusicStore().reset()
-    authenticated.value = false
-    username.value = ''
-    role.value = ''
+      try {
+        sessionStorage.removeItem('gallery_unlocked')
+        sessionStorage.removeItem('tripstar.latestTaskId')
+        sessionStorage.removeItem('tripstar.latestTaskExpireAt')
+      } catch { /* ignore */ }
+
+      useMusicStore().reset()
+      authenticated.value = false
+      username.value = ''
+      role.value = ''
+    }
   }
 
   return { authenticated, checking, username, role, isAdmin, checkAuth, login, logout }

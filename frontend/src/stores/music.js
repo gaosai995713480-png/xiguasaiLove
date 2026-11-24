@@ -13,6 +13,9 @@ export const useMusicStore = defineStore('music', () => {
   const playError = ref('')  // B1: 播放失败时展示错误信息
   const bgm = ref(null)          // 首页背景音乐配置（管理员设置，全局共享）
   const bgmBlocked = ref(false)  // 浏览器拦截了自动播放，需要用户点一下
+  const mediaLoading = ref(false)
+  let mediaRequestId = 0
+  let lyricRequestId = 0
 
   // 使用 markRaw 避免 Vue 对 Audio 做响应式代理
   const audio = markRaw(new Audio())
@@ -104,32 +107,39 @@ export const useMusicStore = defineStore('music', () => {
   }
 
   async function loadLyrics(songId, platform) {
+    const requestId = ++lyricRequestId
     lyricLines.value = []
     currentLyricIndex.value = -1
     try {
       const data = await musicApi.lyric(songId, platform || 'netease')
+      if (requestId !== lyricRequestId) return
       lyricLines.value = parseLRC(data.lyric || '')
     } catch (e) {
+      if (requestId !== lyricRequestId) return
       console.warn('歌词加载失败', e)
     }
   }
 
   async function play(index) {
     if (index < 0 || index >= songs.value.length) return
+    const requestId = ++mediaRequestId
     currentIndex.value = index
     const s = songs.value[index]
     playError.value = ''
+    mediaLoading.value = true
     audio.loop = false  // 歌单按顺序播放，清掉 BGM 留下的循环标记
     loadLyrics(s.netease_id, s.platform || 'netease')
     try {
       const data = await musicApi.url(s.netease_id, s.platform || 'netease')
+      if (requestId !== mediaRequestId) return
       if (data.url) {
         audio.src = toHttpsMediaUrl(data.url)
         // B5: 统一 try/catch 处理浏览器播放拒绝
         try {
           await audio.play()
-          isPlaying.value = true
+          if (requestId === mediaRequestId) isPlaying.value = true
         } catch (e) {
+          if (requestId !== mediaRequestId) return
           isPlaying.value = false
           if (e.name === 'NotAllowedError') {
             playError.value = '浏览器阻止自动播放，请手动点击播放'
@@ -143,8 +153,11 @@ export const useMusicStore = defineStore('music', () => {
         playError.value = '该歌曲暂无播放源'
       }
     } catch (e) {
+      if (requestId !== mediaRequestId) return
       isPlaying.value = false
       playError.value = '播放请求失败'
+    } finally {
+      if (requestId === mediaRequestId) mediaLoading.value = false
     }
   }
 
@@ -153,21 +166,30 @@ export const useMusicStore = defineStore('music', () => {
   // 进入首页时调用：拉取管理员设置的 BGM 并循环播放。
   // 复用同一个 audio 实例，保证首页 BGM 和音乐页播放器不会同时出声。
   async function startBgm() {
-    if (isPlaying.value) return  // 音乐页已经在放歌，不打断
+    if (isPlaying.value || mediaLoading.value) return  // 音乐页已经在放歌，不打断
+    const requestId = ++mediaRequestId
+    mediaLoading.value = true
     try {
       const data = await bgmApi.get()
+      if (requestId !== mediaRequestId) return
       bgm.value = data.enabled ? data : null
     } catch {
+      if (requestId !== mediaRequestId) return
       bgm.value = null
+      mediaLoading.value = false
       return
     }
-    if (!bgm.value) return
+    if (!bgm.value) {
+      mediaLoading.value = false
+      return
+    }
 
     currentIndex.value = -1
     playError.value = ''
     if (bgm.value.source === 'meting' && bgm.value.song_id) {
       loadLyrics(bgm.value.song_id, bgm.value.platform || 'netease')
     } else {
+      lyricRequestId += 1
       lyricLines.value = []
       currentLyricIndex.value = -1
     }
@@ -176,9 +198,12 @@ export const useMusicStore = defineStore('music', () => {
     audio.loop = true
     try {
       await audio.play()
-      isPlaying.value = true
-      bgmBlocked.value = false
+      if (requestId === mediaRequestId) {
+        isPlaying.value = true
+        bgmBlocked.value = false
+      }
     } catch (e) {
+      if (requestId !== mediaRequestId) return
       // NotAllowedError = 浏览器自动播放策略拦截，点一下即可；
       // AbortError = 被后续 startBgm/play 打断，忽略；
       // 其他错误说明音频源本身有问题，不要伪装成“点一下就能播”
@@ -190,23 +215,30 @@ export const useMusicStore = defineStore('music', () => {
         bgmBlocked.value = false
         playError.value = `音频加载失败（${e.name}）`
       }
+    } finally {
+      if (requestId === mediaRequestId) mediaLoading.value = false
     }
   }
 
   // 用户点击「播放」后重试，用于绕过自动播放拦截
   async function resumeBgm() {
-    if (!bgm.value) return
+    if (!bgm.value || mediaLoading.value) return
+    const requestId = mediaRequestId
     try {
       await audio.play()
-      isPlaying.value = true
-      bgmBlocked.value = false
+      if (requestId === mediaRequestId) {
+        isPlaying.value = true
+        bgmBlocked.value = false
+      }
     } catch {
+      if (requestId !== mediaRequestId) return
       isPlaying.value = false
       playError.value = '播放失败，请重试'
     }
   }
 
   function togglePlay() {
+    if (mediaLoading.value) return
     if (isPlaying.value) {
       audio.pause()
       isPlaying.value = false
@@ -228,9 +260,11 @@ export const useMusicStore = defineStore('music', () => {
       return play(currentIndex.value)
     } else {
       // B2: await play() 并 catch，确保状态同步
+      const requestId = mediaRequestId
       audio.play().then(() => {
-        isPlaying.value = true
+        if (requestId === mediaRequestId) isPlaying.value = true
       }).catch(() => {
+        if (requestId !== mediaRequestId) return
         isPlaying.value = false
         playError.value = '播放失败，请重试'
       })
@@ -257,11 +291,14 @@ export const useMusicStore = defineStore('music', () => {
   function handleSongRemoved(removedIndex) {
     if (songs.value.length === 0) {
       // 歌单清空
+      mediaRequestId += 1
+      lyricRequestId += 1
       currentIndex.value = -1
       audio.pause()
       audio.src = ''
       isPlaying.value = false
       lyricLines.value = []
+      mediaLoading.value = false
       return
     }
     if (removedIndex === currentIndex.value) {
@@ -283,6 +320,8 @@ export const useMusicStore = defineStore('music', () => {
   }
 
   function reset() {
+    mediaRequestId += 1
+    lyricRequestId += 1
     audio.pause()
     audio.src = ''
     audio.loop = false
@@ -295,12 +334,13 @@ export const useMusicStore = defineStore('music', () => {
     playError.value = ''
     bgm.value = null
     bgmBlocked.value = false
+    mediaLoading.value = false
   }
 
   return {
     songs, currentIndex, isPlaying, lyricLines, currentLyricIndex,
     currentTime, duration, currentSong, currentPlatformName,
-    playError, bgm, bgmBlocked,
+    playError, bgm, bgmBlocked, mediaLoading,
     audio, PLATFORM_NAMES,
     loadSongs, loadLyrics, play, togglePlay, next, prev,
     startBgm, resumeBgm,

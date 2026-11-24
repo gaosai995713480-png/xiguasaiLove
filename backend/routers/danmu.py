@@ -1,15 +1,23 @@
 """弹幕路由"""
 import re
+
 from fastapi import APIRouter, Request, Depends
+from fastapi.responses import JSONResponse
+
 from ..database import get_db
 from ..config import settings
 from ..dependencies import require_auth
+from ..security import get_client_ip
 
 router = APIRouter(tags=["danmu"])
 
 
+def _error(message: str, status_code: int) -> JSONResponse:
+    return JSONResponse({"error": message}, status_code=status_code)
+
+
 @router.get("/danmu")
-def list_danmu(limit: int = 50):
+def list_danmu(limit: int = 50, _=Depends(require_auth)):
     limit = max(1, min(limit, settings.danmu_limit))
     with get_db() as conn:
         with conn.cursor() as cursor:
@@ -26,7 +34,7 @@ def send_danmu(body: dict, _=Depends(require_auth)):
     text = str(body.get("text", "")).strip()
     text = re.sub(r"\s+", " ", text).strip()
     if not text:
-        return {"error": "empty"}, 400
+        return _error("empty", 400)
     text = text[: settings.danmu_maxlen]
 
     with get_db() as conn:
@@ -46,17 +54,19 @@ def like_danmu(body: dict, request: Request, _=Depends(require_auth)):
     except (ValueError, TypeError):
         danmu_id = 0
     if danmu_id <= 0:
-        return {"error": "invalid id"}, 400
+        return _error("invalid id", 400)
 
-    client_ip = (
-        request.headers.get("X-Real-IP")
-        or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        or request.client.host
-    )
+    client_ip = get_client_ip(request)
     like_table = f"{settings.danmu_table}_likes"
 
     with get_db() as conn:
         with conn.cursor() as cursor:
+            cursor.execute(
+                f"SELECT id FROM `{settings.danmu_table}` WHERE id = %s",
+                (danmu_id,),
+            )
+            if not cursor.fetchone():
+                return _error("not found", 404)
             cursor.execute(
                 f"INSERT IGNORE INTO `{like_table}` (danmu_id, ip) VALUES (%s, %s)",
                 (danmu_id, client_ip),

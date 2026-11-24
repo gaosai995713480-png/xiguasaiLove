@@ -125,19 +125,48 @@ class RealTripStarPlanner:
         last_error: TripStarLLMError | None = None
         for attempt in range(2):
             try:
-                return self.llm.chat_json(
+                plan = self.llm.chat_json(
                     system_prompt=(
                         "你是 TripStar 旅行规划智能体。你必须基于用户需求、小红书游记摘要和地图 POI 候选，"
                         "输出严格 JSON 对象；不得输出 markdown；不得编造不存在的字段。"
                     ),
                     user_prompt=self._build_user_prompt(request, xhs_notes, poi_candidates),
                 )
+                self._validate_llm_plan(request, plan)
+                return plan
             except TripStarLLMError as exc:
                 last_error = exc
                 logger.warning("LLM 规划调用失败（第 %d 次）：%s", attempt + 1, exc)
+            except ValueError as exc:
+                last_error = TripStarLLMError(str(exc))
+                logger.warning("LLM 规划结果校验失败（第 %d 次）：%s", attempt + 1, exc)
             except Exception as exc:
                 raise RealTripStarPlannerError(f"大模型规划失败：{exc}") from exc
         raise last_error
+
+    @staticmethod
+    def _validate_llm_plan(request: TripStarRequest, plan: dict[str, Any]) -> None:
+        if not isinstance(plan, dict):
+            raise ValueError("大模型规划结果必须是 JSON 对象")
+        if not str(plan.get("overview") or "").strip():
+            raise ValueError("大模型规划结果缺少 overview")
+
+        days = plan.get("days")
+        if not isinstance(days, list) or len(days) < request.travel_days:
+            raise ValueError(f"大模型返回的 days 少于请求的 {request.travel_days} 天")
+
+        for index in range(request.travel_days):
+            day = days[index]
+            if not isinstance(day, dict):
+                raise ValueError(f"第 {index + 1} 天不是对象")
+            attractions = day.get("attractions")
+            if not isinstance(attractions, list) or not attractions:
+                raise ValueError(f"第 {index + 1} 天没有景点")
+            if not any(
+                isinstance(item, dict) and str(item.get("name") or "").strip()
+                for item in attractions
+            ):
+                raise ValueError(f"第 {index + 1} 天景点缺少名称")
 
     def _build_user_prompt(
         self,

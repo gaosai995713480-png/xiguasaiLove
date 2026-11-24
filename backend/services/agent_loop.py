@@ -9,8 +9,10 @@ import logging
 from typing import AsyncGenerator
 
 import httpx
+from starlette.concurrency import run_in_threadpool
 
 from ..database import get_config
+from .ai_chat import build_anthropic_messages_url, build_openai_chat_url, split_anthropic_messages
 from .agent_tools import (
     get_tools_for_openai,
     get_tools_for_anthropic,
@@ -47,9 +49,9 @@ async def codex_agent_loop(
 ) -> AsyncGenerator[str, None]:
     """Codex Agent 循环 — OpenAI Chat Completions + tools"""
     tools = get_tools_for_openai()
-    max_rounds = _get_max_rounds()
-    show_process = _show_tool_process()
-    url = f"{base_url.rstrip('/')}/v1/chat/completions"
+    max_rounds = await run_in_threadpool(_get_max_rounds)
+    show_process = await run_in_threadpool(_show_tool_process)
+    url = build_openai_chat_url(base_url)
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -217,9 +219,9 @@ async def claude_agent_loop(
 ) -> AsyncGenerator[str, None]:
     """Claude Agent 循环 — Anthropic Messages API + tools"""
     tools = get_tools_for_anthropic()
-    max_rounds = _get_max_rounds()
-    show_process = _show_tool_process()
-    url = f"{base_url.rstrip('/')}/v1/messages"
+    max_rounds = await run_in_threadpool(_get_max_rounds)
+    show_process = await run_in_threadpool(_show_tool_process)
+    url = build_anthropic_messages_url(base_url)
     headers = {
         "x-api-key": api_key,
         "anthropic-version": "2023-06-01",
@@ -227,15 +229,7 @@ async def claude_agent_loop(
     }
 
     # 分离 system 消息
-    system_text = ""
-    chat_messages = []
-    for msg in messages:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-        if role == "system":
-            system_text = content
-        else:
-            chat_messages.append({"role": role, "content": content})
+    system_text, chat_messages = split_anthropic_messages(messages)
 
     for round_idx in range(max_rounds):
         body = {

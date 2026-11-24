@@ -47,6 +47,12 @@ const flushPromises = async () => {
   await Promise.resolve()
 }
 
+function deferred() {
+  let resolve
+  const promise = new Promise((res) => { resolve = res })
+  return { promise, resolve }
+}
+
 async function mountView() {
   const { default: UsersView } = await import('../views/UsersView.vue')
   return mount(UsersView, {
@@ -129,5 +135,28 @@ describe('UsersView 导出回忆', () => {
     expect(download.attributes('href')).toBe('/api/backup/export/download')
     expect(download.attributes('download')).toBe('xiguasai-memory-2026-09-18.zip')
     wrapper.unmount()
+  })
+
+  it('卸载时仍在途的状态请求不会重新启动轮询', async () => {
+    vi.useFakeTimers()
+    const initialStatus = deferred()
+    mockBackupStatus.mockReset()
+    mockBackupStatus.mockReturnValue(initialStatus.promise)
+
+    const wrapper = await mountView()
+    await flushPromises()
+    expect(mockBackupStatus).toHaveBeenCalledTimes(1)
+
+    wrapper.unmount()
+    initialStatus.resolve({
+      status: 'packing',
+      progress: { current: 1, total: 3, message: '打包中' },
+    })
+    await flushPromises()
+
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+
+    expect(mockBackupStatus).toHaveBeenCalledTimes(1)
   })
 })

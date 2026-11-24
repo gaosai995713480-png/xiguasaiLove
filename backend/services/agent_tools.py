@@ -9,6 +9,8 @@ import logging
 from typing import Callable, Any
 from contextvars import ContextVar
 
+from starlette.concurrency import run_in_threadpool
+
 from ..database import get_db, get_config
 from ..config import settings
 from ..services.gaode import proxy_gaode
@@ -90,7 +92,7 @@ async def execute_tool(name: str, arguments: dict) -> str:
 
     handler = tool["handler"]
     try:
-        result = handler(**arguments)
+        result = await run_in_threadpool(handler, **arguments)
         if isinstance(result, str):
             return result
         return json.dumps(result, ensure_ascii=False, default=str)

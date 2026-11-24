@@ -112,4 +112,24 @@ describe('TripStarView', () => {
 
     expect(mockPush).toHaveBeenCalledWith('/')
   })
+
+  it('恢复任务遇到瞬时网络错误时保留 taskId，等待下次重试', async () => {
+    sessionStorage.setItem('tripstar.latestTaskId', 'task-online-003')
+    sessionStorage.setItem('tripstar.latestTaskExpireAt', String(Date.now() + 60_000))
+    mockGetStatus.mockRejectedValueOnce(new Error('network down'))
+
+    const { default: TripStarView } = await import('../views/TripStarView.vue')
+    mount(TripStarView, {
+      global: {
+        stubs: {
+          TopBar: { template: '<div />' },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(sessionStorage.getItem('tripstar.latestTaskId')).toBe('task-online-003')
+    expect(mockReplace).not.toHaveBeenCalled()
+  })
 })

@@ -1,10 +1,24 @@
+import secrets
+import time
+
+import pytest
 from fastapi.testclient import TestClient
 
+from backend.dependencies import SESSION_COOKIE_NAME, UserInfo, _cache_session
 from backend.main import app
 from backend.tripstar.config import TripStarSettings
 
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def login_tripstar():
+    token = secrets.token_urlsafe(24)
+    _cache_session(token, UserInfo(username="tripstar_xhs_user", role="visitor"), time.time() + 3600)
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    yield
+    client.cookies.clear()
 
 
 def test_tripstar_xhs_status_reports_configured(monkeypatch):

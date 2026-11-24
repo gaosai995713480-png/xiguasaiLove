@@ -27,6 +27,14 @@ def _config_value(name: str, *env_names: str, default: str = "") -> str:
     return default
 
 
+def _config_int(name: str, *env_names: str, default: int) -> int:
+    raw = _config_value(name, *env_names, default=str(default))
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return default
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     value = _db_config(name)
     if value == "":
@@ -53,7 +61,9 @@ class TripStarSettings:
         default_factory=lambda: _config_value("TRIPSTAR_LLM_BASE_URL", "LLM_BASE_URL")
     )
     llm_timeout: int = field(
-        default_factory=lambda: int(_config_value("TRIPSTAR_LLM_TIMEOUT", "LLM_TIMEOUT", default="600"))
+        default_factory=lambda: _config_int(
+            "TRIPSTAR_LLM_TIMEOUT", "LLM_TIMEOUT", default=600
+        )
     )
 
     amap_web_key: str = field(

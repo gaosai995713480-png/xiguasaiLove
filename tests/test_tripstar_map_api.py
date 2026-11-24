@@ -1,10 +1,25 @@
+import secrets
+import time
+
+import httpx
+import pytest
 from fastapi.testclient import TestClient
 
+from backend.dependencies import SESSION_COOKIE_NAME, UserInfo, _cache_session
 from backend.main import app
 from backend.tripstar.config import TripStarSettings
 
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def login_tripstar():
+    token = secrets.token_urlsafe(24)
+    _cache_session(token, UserInfo(username="tripstar_map_user", role="visitor"), time.time() + 3600)
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    yield
+    client.cookies.clear()
 
 
 def _settings_with_amap_key() -> TripStarSettings:
@@ -143,3 +158,29 @@ def test_tripstar_map_config_rejects_placeholder_frontend_key(monkeypatch):
     assert payload["configured"] is False
     assert payload["amap_web_js_key"] == ""
     assert "VITE_TRIPSTAR_AMAP_WEB_JS_KEY" in payload["message"]
+
+
+def test_tripstar_amap_http_error_does_not_expose_key(monkeypatch):
+    from backend.tripstar.services import amap_service
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url, params=None):
+            request = httpx.Request("GET", url, params=params)
+            response = httpx.Response(403, request=request)
+            response.raise_for_status()
+
+    monkeypatch.setattr(amap_service.httpx, "Client", FakeClient)
+
+    with pytest.raises(amap_service.AmapServiceError) as exc_info:
+        amap_service.AmapService("test-secret-key").geocode("西安", "钟楼")
+
+    assert "test-secret-key" not in str(exc_info.value)

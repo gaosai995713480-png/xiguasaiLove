@@ -1,6 +1,9 @@
+import pytest
+
 from backend.tripstar.config import TripStarSettings
 from backend.tripstar.models.schemas import TripStarRequest
 from backend.tripstar.real_planner import RealTripStarPlanner
+from backend.tripstar.services.llm_service import TripStarLLMError
 
 
 class FakeLLMClient:
@@ -157,3 +160,31 @@ def test_real_planner_uses_xhs_amap_and_llm_to_build_frontend_plan():
     assert llm.prompts and "小红书" in llm.prompts[0]["user"]
     assert amap.route_points == [["黄鹤楼", "户部巷"]]
     assert progress_events[0][0] == "xhs"
+
+
+def test_real_planner_rejects_empty_days():
+    class EmptyLLM:
+        def chat_json(self, **kwargs):
+            return {"overview": "空行程", "days": []}
+
+    settings = TripStarSettings(
+        mock_mode=False,
+        llm_model_id="demo-llm",
+        llm_api_key="demo-key",
+        llm_base_url="https://llm.example/v1",
+        amap_web_key="",
+        xhs_cookie="",
+        enable_xhs=False,
+    )
+    planner = RealTripStarPlanner(settings, llm_client=EmptyLLM(), xhs_service=None, amap_service=None)
+
+    with pytest.raises(TripStarLLMError, match="days"):
+        planner.plan(
+            TripStarRequest(
+                city="西安",
+                start_date="2026-06-01",
+                end_date="2026-06-03",
+                travel_days=3,
+            ),
+            lambda *args: None,
+        )

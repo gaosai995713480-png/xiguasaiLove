@@ -1,5 +1,9 @@
 """时间轴路由"""
+import datetime
+
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+
 from ..database import get_db
 from ..config import settings
 from ..dependencies import require_auth, require_role
@@ -7,8 +11,19 @@ from ..dependencies import require_auth, require_role
 router = APIRouter(prefix="/api", tags=["timeline"])
 
 
+def _error(message: str, status_code: int) -> JSONResponse:
+    return JSONResponse({"error": message}, status_code=status_code)
+
+
+def _parse_date(value: str) -> datetime.date | None:
+    try:
+        return datetime.date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @router.get("/timeline")
-def list_timeline():
+def list_timeline(_=Depends(require_auth)):
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -37,7 +52,17 @@ def create_timeline(body: dict, _=Depends(require_role("admin"))):
     icon = str(body.get("icon", "💕")).strip() or "💕"
 
     if not event_date or not title:
-        return {"error": "event_date and title are required"}, 400
+        return _error("event_date and title are required", 400)
+    if _parse_date(event_date) is None:
+        return _error("invalid event_date", 400)
+    if len(title) > 100:
+        return _error("title too long (max 100)", 400)
+    if len(content) > 10000:
+        return _error("content too long (max 10000)", 400)
+    if len(photo_url) > 500:
+        return _error("photo_url too long (max 500)", 400)
+    if len(icon) > 10:
+        return _error("icon too long (max 10)", 400)
 
     with get_db() as conn:
         with conn.cursor() as cursor:
@@ -53,7 +78,7 @@ def create_timeline(body: dict, _=Depends(require_role("admin"))):
 @router.delete("/timeline")
 def delete_timeline(id: int, _=Depends(require_role("admin"))):
     if id <= 0:
-        return {"error": "invalid id"}, 400
+        return _error("invalid id", 400)
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -62,5 +87,5 @@ def delete_timeline(id: int, _=Depends(require_role("admin"))):
             affected = cursor.rowcount
         conn.commit()
     if not affected:
-        return {"error": "not found"}, 404
+        return _error("not found", 404)
     return {"ok": True}

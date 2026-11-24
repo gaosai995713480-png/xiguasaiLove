@@ -27,6 +27,9 @@ const backupBusy = ref(false)
 const backupHint = ref('')
 const backupDownloadHref = '/api/backup/export/download'
 let backupPollTimer = 0
+let backupPollRequestInFlight = false
+let backupViewActive = false
+let backupStatusRequestSeq = 0
 
 async function loadUsers() {
   try {
@@ -120,6 +123,7 @@ function formatBackupSize(bytes) {
 }
 
 function applyBackupJob(job) {
+  if (!backupViewActive) return
   backupJob.value = job && job.status ? job : { status: 'idle' }
   if (backupJob.value.status === 'packing') {
     startBackupPolling()
@@ -129,10 +133,14 @@ function applyBackupJob(job) {
 }
 
 async function loadBackupStatus() {
+  const requestId = ++backupStatusRequestSeq
   try {
-    applyBackupJob(await backupApi.status())
+    const job = await backupApi.status()
+    if (backupViewActive && requestId === backupStatusRequestSeq) applyBackupJob(job)
   } catch {
-    applyBackupJob({ status: 'idle' })
+    if (backupViewActive && requestId === backupStatusRequestSeq) {
+      applyBackupJob({ status: 'idle' })
+    }
   }
 }
 
@@ -140,8 +148,10 @@ async function startBackup() {
   if (backupBusy.value || backupPacking.value) return
   backupBusy.value = true
   backupHint.value = ''
+  const requestId = ++backupStatusRequestSeq
   try {
-    applyBackupJob(await backupApi.start())
+    const job = await backupApi.start()
+    if (backupViewActive && requestId === backupStatusRequestSeq) applyBackupJob(job)
   } catch {
     backupHint.value = '导出没有开始，请稍后重试'
   } finally {
@@ -152,10 +162,16 @@ async function startBackup() {
 function startBackupPolling() {
   if (backupPollTimer) return
   backupPollTimer = window.setInterval(async () => {
+    if (backupPollRequestInFlight || !backupViewActive) return
+    backupPollRequestInFlight = true
+    const requestId = ++backupStatusRequestSeq
     try {
-      applyBackupJob(await backupApi.status())
+      const job = await backupApi.status()
+      if (backupViewActive && requestId === backupStatusRequestSeq) applyBackupJob(job)
     } catch {
       stopBackupPolling()
+    } finally {
+      backupPollRequestInFlight = false
     }
   }, POLL_MS)
 }
@@ -167,6 +183,7 @@ function stopBackupPolling() {
 }
 
 onMounted(() => {
+  backupViewActive = true
   if (!authStore.isAdmin) {
     router.replace('/')
     return
@@ -178,6 +195,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  backupViewActive = false
+  backupStatusRequestSeq += 1
   stopBackupPolling()
 })
 </script>

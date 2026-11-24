@@ -53,7 +53,7 @@ async function loadDanmu() {
 
 function clearDanmuLayer() {
   const layer = document.getElementById('danmu-layer')
-  if (layer) layer.innerHTML = ''
+  if (layer) layer.replaceChildren()
 }
 
 function streamIntervalMs(warmup = false) {
@@ -102,12 +102,20 @@ function spawnDanmu(item, fresh = false) {
   if (isEmoji) el.classList.add('is-emoji')
   el.style.top = (Math.random() * 70 + 5) + '%'
   el.style.setProperty('--duration', danmuSpeed.value + 's')
-  el.innerHTML = `<span>${item.text}</span><span class="danmu-like" data-id="${item.id}">❤️ ${item.likes || 0}</span>`
-  el.querySelector('.danmu-like').addEventListener('click', async (ev) => {
+
+  const textEl = document.createElement('span')
+  textEl.textContent = String(item.text ?? '')
+
+  const likeEl = document.createElement('span')
+  likeEl.className = 'danmu-like'
+  likeEl.dataset.id = String(item.id ?? '')
+  likeEl.textContent = `❤️ ${Number(item.likes) || 0}`
+  likeEl.addEventListener('click', async (ev) => {
     ev.stopPropagation()
-    const likeEl = el.querySelector('.danmu-like')
     await handleLike(item, likeEl)
   })
+
+  el.append(textEl, likeEl)
   el.addEventListener('touchstart', () => {
     el.style.animationPlayState = 'paused'
   }, { passive: true })
@@ -184,7 +192,7 @@ async function sendDanmu() {
 function cleanup() {
   stopStream()
   const layer = document.getElementById('danmu-layer')
-  if (layer) layer.innerHTML = ''
+  if (layer) layer.replaceChildren()
 }
 
 defineExpose({ cleanup })
