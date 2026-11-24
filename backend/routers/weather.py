@@ -1,8 +1,7 @@
 """天气代理路由"""
 from fastapi import APIRouter, Depends
-from ..config import settings
 from ..dependencies import require_auth
-from ..services.gaode import proxy_gaode
+from ..services.gaode import proxy_gaode, resolve_gaode_key
 
 router = APIRouter(prefix="/api", tags=["weather"])
 
@@ -16,7 +15,7 @@ def weather(city: str = "420100", extensions: str = "base", _=Depends(require_au
     result = proxy_gaode(
         "https://restapi.amap.com/v3/weather/weatherInfo",
         {"city": city, "extensions": extensions},
-        settings.gaode_key,
+        resolve_gaode_key(),
     )
     return result
 
@@ -26,7 +25,7 @@ def district(keywords: str = "中国", subdistrict: int = 1, _=Depends(require_a
     result = proxy_gaode(
         "https://restapi.amap.com/v3/config/district",
         {"keywords": keywords, "subdistrict": str(subdistrict)},
-        settings.gaode_key,
+        resolve_gaode_key(),
     )
     return result
 
@@ -36,7 +35,7 @@ def locate(_=Depends(require_auth)):
     result = proxy_gaode(
         "https://restapi.amap.com/v3/ip",
         {},
-        settings.gaode_key,
+        resolve_gaode_key(),
     )
     
     def get_str(k: str) -> str:

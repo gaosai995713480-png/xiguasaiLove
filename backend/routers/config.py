@@ -28,6 +28,7 @@ _CONFIG_LABELS = {
     "TRIPSTAR_LLM_API_KEY": "TripStar 大模型 API Key",
     "TRIPSTAR_LLM_BASE_URL": "TripStar 大模型 Base URL",
     "TRIPSTAR_LLM_TIMEOUT": "TripStar 大模型超时秒数",
+    "AMAP_KEY": "高德天气 Web 服务 Key",
     "TRIPSTAR_AMAP_WEB_KEY": "TripStar 高德 Web 服务 Key",
     "TRIPSTAR_ENABLE_XHS": "TripStar 小红书开关",
     "TRIPSTAR_XHS_COOKIE": "TripStar 小红书 Cookie",

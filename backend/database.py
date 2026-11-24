@@ -581,6 +581,7 @@ def init_tables():
             ("TRIPSTAR_LLM_API_KEY", ""),
             ("TRIPSTAR_LLM_BASE_URL", ""),
             ("TRIPSTAR_LLM_TIMEOUT", "600"),
+            ("AMAP_KEY", ""),
             ("TRIPSTAR_AMAP_WEB_KEY", ""),
             ("TRIPSTAR_ENABLE_XHS", "false"),
             ("TRIPSTAR_XHS_COOKIE", ""),

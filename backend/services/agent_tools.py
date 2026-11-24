@@ -13,7 +13,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ..database import get_db, get_config
 from ..config import settings
-from ..services.gaode import proxy_gaode
+from ..services.gaode import proxy_gaode, resolve_gaode_key
 from ..services.kuaidi100 import query_express, detect_company
 
 logger = logging.getLogger(__name__)
@@ -127,7 +127,7 @@ def tool_weather_query(city: str, forecast: bool = False) -> dict:
         district_result = proxy_gaode(
             "https://restapi.amap.com/v3/config/district",
             {"keywords": city, "subdistrict": "0"},
-            settings.gaode_key,
+            resolve_gaode_key(),
         )
         districts = district_result.get("districts", [])
         if districts:
@@ -142,7 +142,7 @@ def tool_weather_query(city: str, forecast: bool = False) -> dict:
     result = proxy_gaode(
         "https://restapi.amap.com/v3/weather/weatherInfo",
         {"city": adcode, "extensions": extensions},
-        settings.gaode_key,
+        resolve_gaode_key(),
     )
 
     if forecast:

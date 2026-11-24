@@ -6,7 +6,19 @@ import logging
 import urllib.request
 from urllib.parse import quote
 
+from ..config import settings
+from ..database import get_config
+
 logger = logging.getLogger(__name__)
+
+
+def resolve_gaode_key() -> str:
+    """解析高德 Web 服务 Key，数据库配置优先于进程环境变量。"""
+    for key in ("AMAP_KEY", "TRIPSTAR_AMAP_WEB_KEY"):
+        value = str(get_config(key) or "").strip()
+        if value:
+            return value
+    return str(settings.gaode_key or "").strip()
 
 
 def proxy_gaode(url: str, params: dict, gaode_key: str) -> dict:
