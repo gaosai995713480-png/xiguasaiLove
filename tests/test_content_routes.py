@@ -41,6 +41,27 @@ def setup_function():
         _session_expiries.clear()
 
 
+def test_health_endpoint_checks_application_and_database():
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "database": "ok"}
+
+
+def test_health_endpoint_returns_503_when_database_is_unavailable(monkeypatch):
+    @contextmanager
+    def broken_db():
+        raise RuntimeError("database unavailable")
+        yield
+
+    monkeypatch.setattr("backend.main.get_db", broken_db)
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 503
+    assert response.json() == {"status": "error", "database": "unavailable"}
+
+
 @pytest.mark.parametrize(
     "path",
     [

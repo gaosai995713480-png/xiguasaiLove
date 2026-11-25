@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from .config import settings
-from .database import init_tables
+from .database import get_db, init_tables
 from .services.recipe_bootstrap import ensure_howtocook_recipes_seeded
 
 # 路由
@@ -74,6 +74,23 @@ app.include_router(recipes.router)
 app.include_router(day.router)
 app.include_router(backup.router)
 app.include_router(tripstar_router.router)
+
+
+@app.get("/api/health", tags=["health"])
+def health_check():
+    """部署探针：确认应用可响应且数据库可连接。"""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+    except Exception as exc:
+        logger.warning("健康检查失败: %s", exc)
+        return JSONResponse(
+            {"status": "error", "database": "unavailable"},
+            status_code=503,
+        )
+    return {"status": "ok", "database": "ok"}
 
 
 @app.on_event("startup")

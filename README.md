@@ -126,7 +126,17 @@ python tools/reset_password.py --gallery
 
 ## 🚢 部署
 
-推送到 `master` 分支后，GitHub Actions 流水线（`.github/workflows/deploy.yml`）会自动通过 SSH 部署到服务器。
+推送到 `master` 分支后，GitHub Actions 流水线（`.github/workflows/deploy.yml`）
+会先运行后端测试、前端测试和前端构建；全部通过后再自动通过 SSH 部署到服务器，
+无需手动确认。
+
+- Pull Request 和 `master` 推送都会执行 CI
+- 后端测试使用临时 MySQL 服务容器，不连接生产数据库
+- 部署后请求 `/api/health`，验证应用与数据库均可用
+- 健康检查失败会尝试回滚到上一个提交，并让流水线失败
+
+服务器需要预装 `git`、Python 虚拟环境、Node.js 22/npm、systemd，
+以及用于健康检查的 `curl`。如果使用 Nginx/Caddy，继续保留现有反向代理即可。
 
 ## 📄 环境变量
 

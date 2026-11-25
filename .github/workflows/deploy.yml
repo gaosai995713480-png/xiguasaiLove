@@ -1,11 +1,102 @@
-name: Deploy
+name: CI/CD
+
 on:
+  pull_request:
+    branches: ["master"]
   push:
-    branches: [ "master" ]
+    branches: ["master"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: love-ci-cd-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  backend-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_ROOT_HOST: "%"
+          MYSQL_DATABASE: love_page_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "3306"
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: love_page_ci
+      COOKIE_SECURE: "false"
+      INITIAL_ADMIN_USERNAME: admin
+      INITIAL_ADMIN_PASSWORD: ci-admin-password
+      INITIAL_GALLERY_PASSWORD: ci-gallery-password
+      INITIAL_INVITE_CODE: ci-invite-code
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Initialize CI database
+        run: python -c "from backend.database import ensure_database, init_tables; ensure_database(); init_tables()"
+
+      - name: Run backend tests
+        run: python -m pytest tests -q -p no:cacheprovider
+
+  frontend-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm run test:run
+
+      - name: Build frontend
+        run: npm run build -- --outDir "$RUNNER_TEMP/frontend-build" --emptyOutDir
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [backend-test, frontend-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       DEPLOY_HOST: 94.103.173.47
       DEPLOY_USER: root
@@ -30,15 +121,51 @@ jobs:
       - name: Deploy
         run: |
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" << 'EOF'
-          set -e
+          set -euo pipefail
           cd /srv/love
           sudo -u love git config --global --add safe.directory /srv/love || true
-          sudo -u love git checkout -- .
-          sudo -u love git pull origin master
+          previous_commit="$(sudo -u love git rev-parse HEAD)"
+          sudo -u love git fetch --prune origin master
+          sudo -u love git reset --hard origin/master
           sudo -u love /srv/love/.venv/bin/pip install -r /srv/love/requirements.txt
-          sudo -u love /srv/love/.venv/bin/python tools/ensure_howtocook_recipes.py
-          cd /srv/love/frontend && sudo -u love npm install && sudo -u love npm run build
+          sudo -u love /srv/love/.venv/bin/python /srv/love/tools/ensure_howtocook_recipes.py
+          cd /srv/love/frontend
+          sudo -u love npm ci
+          sudo -u love npm run build
           cd /srv/love
           systemctl restart love
-          systemctl status love --no-pager
+
+          health_check() {
+            for _attempt in $(seq 1 30); do
+              if curl -fsS --max-time 5 http://127.0.0.1:8000/api/health >/dev/null; then
+                echo "Health check passed"
+                return 0
+              fi
+              sleep 2
+            done
+            return 1
+          }
+
+          if health_check; then
+            systemctl status love --no-pager
+            exit 0
+          fi
+
+          echo "Health check failed; rolling back to ${previous_commit}"
+          systemctl status love --no-pager || true
+          sudo -u love git reset --hard "${previous_commit}"
+          sudo -u love /srv/love/.venv/bin/pip install -r /srv/love/requirements.txt
+          cd /srv/love/frontend
+          sudo -u love npm ci
+          sudo -u love npm run build
+          cd /srv/love
+          systemctl restart love
+
+          if health_check; then
+            echo "Rollback restored a healthy service, but deployment failed."
+          else
+            echo "Rollback health check also failed."
+            systemctl status love --no-pager || true
+          fi
+          exit 1
           EOF
