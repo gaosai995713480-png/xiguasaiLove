@@ -305,16 +305,24 @@ onUnmounted(() => {
           </thead>
           <tbody>
             <tr v-for="item in configKeys" :key="item.key">
-              <td><code class="config-key">{{ item.key }}</code></td>
-              <td>{{ item.label }}</td>
-              <td>
-                <span class="status-dot" :class="item.has_value ? 'on' : 'off'"></span>
-                {{ item.has_value ? '已配置' : '未配置' }}
+              <td data-label="Key">
+                <span class="cell-value"><code class="config-key">{{ item.key }}</code></span>
               </td>
-              <td class="time-col">{{ item.masked_value || '—' }}</td>
+              <td data-label="说明">
+                <span class="cell-value">{{ item.label }}</span>
+              </td>
+              <td data-label="状态">
+                <span class="cell-value">
+                  <span class="status-dot" :class="item.has_value ? 'on' : 'off'"></span>
+                  {{ item.has_value ? '已配置' : '未配置' }}
+                </span>
+              </td>
+              <td data-label="脱敏值" class="time-col">
+                <span class="cell-value">{{ item.masked_value || '—' }}</span>
+              </td>
             </tr>
             <tr v-if="configKeys.length === 0">
-              <td colspan="4" class="empty-config">暂无配置项</td>
+              <td colspan="4" class="empty-config" data-label="">暂无配置项</td>
             </tr>
           </tbody>
         </table>
@@ -339,28 +347,45 @@ onUnmounted(() => {
           </thead>
           <tbody>
             <tr v-for="u in users" :key="u.id" :class="{ 'row-disabled': u.disabled }">
-              <td>{{ u.id }}</td>
-              <td>{{ u.username }}</td>
-              <td><span class="role-badge" :class="u.role">{{ u.role === 'admin' ? '管理员' : '访客' }}</span></td>
-              <td>
-                <span class="status-dot" :class="u.disabled ? 'off' : 'on'"></span>
-                {{ u.disabled ? '已禁用' : '正常' }}
+              <td data-label="ID">
+                <span class="cell-value">{{ u.id }}</span>
               </td>
-              <td class="time-col">{{ u.created_at }}</td>
-              <td class="time-col">
-                <span v-if="u.last_login_at">{{ u.last_login_at }}</span>
-                <span v-else class="admin-hint">从未登录</span>
+              <td data-label="用户名">
+                <span class="cell-value">{{ u.username }}</span>
               </td>
-              <td>
-                <button
-                  v-if="u.role !== 'admin'"
-                  class="btn-small"
-                  :class="u.disabled ? 'btn-enable' : 'btn-disable'"
-                  @click="toggleUser(u.id)"
-                >
-                  {{ u.disabled ? '启用' : '禁用' }}
-                </button>
-                <span v-else class="admin-hint">—</span>
+              <td data-label="角色">
+                <span class="cell-value">
+                  <span class="role-badge" :class="u.role">{{ u.role === 'admin' ? '管理员' : '访客' }}</span>
+                </span>
+              </td>
+              <td data-label="状态">
+                <span class="cell-value">
+                  <span class="status-dot" :class="u.disabled ? 'off' : 'on'"></span>
+                  {{ u.disabled ? '已禁用' : '正常' }}
+                </span>
+              </td>
+              <td data-label="注册时间" class="time-col">
+                <span class="cell-value">{{ u.created_at }}</span>
+              </td>
+              <td data-label="最后登录" class="time-col">
+                <span class="cell-value">
+                  <span v-if="u.last_login_at">{{ u.last_login_at }}</span>
+                  <span v-else class="admin-hint">从未登录</span>
+                </span>
+              </td>
+              <td data-label="操作">
+                <span class="cell-value">
+                  <button
+                    v-if="u.role !== 'admin'"
+                    class="btn-small"
+                    type="button"
+                    :class="u.disabled ? 'btn-enable' : 'btn-disable'"
+                    @click="toggleUser(u.id)"
+                  >
+                    {{ u.disabled ? '启用' : '禁用' }}
+                  </button>
+                  <span v-else class="admin-hint">—</span>
+                </span>
               </td>
             </tr>
           </tbody>
@@ -657,11 +682,103 @@ a.backup-btn {
 .btn-enable:hover { background: rgba(52, 211, 153, 0.2); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(52, 211, 153, 0.2); }
 
 @media (max-width: 600px) {
-  .user-table { font-size: 13px; }
-  .user-table th, .user-table td { padding: 12px 8px; }
   .glass-card { padding: 20px; }
-  .row-disabled td { opacity: 0.5; }
   .section-title-row { align-items: flex-start; flex-direction: column; }
   .config-add-panel { grid-template-columns: 1fr; }
+
+  .config-table-wrap,
+  .user-table-wrap {
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+  }
+
+  .user-table {
+    display: block;
+    width: 100%;
+    border-spacing: 0;
+    font-size: 13px;
+  }
+
+  .user-table thead {
+    display: none;
+  }
+
+  .user-table tbody {
+    display: grid;
+    gap: 12px;
+  }
+
+  .user-table tbody tr {
+    display: block;
+    padding: 12px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.035);
+  }
+
+  .user-table td,
+  .user-table tr td:first-child,
+  .user-table tr td:last-child {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    width: 100%;
+    min-width: 0;
+    padding: 5px 0;
+    border-radius: 0;
+    background: transparent !important;
+    text-align: right;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .user-table td::before {
+    content: attr(data-label);
+    flex: 0 0 76px;
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .user-table .cell-value {
+    flex: 1;
+    min-width: 0;
+    text-align: right;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .user-table tbody tr:hover td {
+    background: transparent;
+  }
+
+  .user-table .empty-config {
+    display: block;
+    text-align: center;
+  }
+
+  .user-table .empty-config::before {
+    display: none;
+  }
+
+  .config-table .config-key {
+    display: inline;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .row-disabled {
+    opacity: 0.65;
+  }
+
+  .row-disabled td {
+    opacity: 1;
+  }
 }
 </style>

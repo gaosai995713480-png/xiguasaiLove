@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { reactive } from 'vue'
+import { nextTick, reactive } from 'vue'
 import { mount } from '@vue/test-utils'
 
 const mockFetchWithAuth = vi.fn()
@@ -126,6 +126,7 @@ describe('AiChatWidget', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   it('切换 provider 后不会复用另一 provider 的 conversationId', async () => {
@@ -247,6 +248,77 @@ describe('AiChatWidget', () => {
     const saveCodex = wrapper.findAll('button').find((button) => button.text().includes('保存 Codex'))
     expect(saveCodex).toBeTruthy()
     expect(saveCodex.attributes('disabled')).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  it('响应全局打开事件，声明 dialog 语义并同步 visualViewport 高度', async () => {
+    mockFetchWithAuth.mockImplementation(async (url) => {
+      if (url === '/api/ai/status') return jsonResponse(providerStatus)
+      if (url === '/api/ai/skills') return jsonResponse([])
+      return jsonResponse({})
+    })
+    vi.stubGlobal('visualViewport', {
+      height: 512,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })
+
+    const wrapper = await mountWidget()
+    await flushPromises()
+    window.dispatchEvent(new CustomEvent('ai-chat:open'))
+    await nextTick()
+
+    const panel = wrapper.get('.ai-chat-panel')
+    expect(panel.attributes('role')).toBe('dialog')
+    expect(panel.attributes('aria-modal')).toBe('true')
+    expect(panel.attributes('tabindex')).toBe('-1')
+    expect(panel.attributes('style')).toContain('--ai-viewport-height: 512px')
+    expect(wrapper.findAll('.chat-header-actions button')).toHaveLength(4)
+    expect(wrapper.get('[aria-label="关闭 AI 助手"]').exists()).toBe(true)
+
+    await panel.trigger('keydown', { key: 'Escape' })
+    await nextTick()
+    expect(wrapper.find('.ai-chat-panel').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('删除历史对话前要求二次确认，取消时不会发删除请求', async () => {
+    mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
+      if (url === '/api/ai/status') return jsonResponse(providerStatus)
+      if (url === '/api/ai/skills') return jsonResponse([])
+      if (url === '/api/ai/conversations?provider=codex') {
+        return jsonResponse([{ id: 77, title: '待删除对话' }])
+      }
+      if (url === '/api/ai/conversations/77' && options.method === 'DELETE') {
+        return jsonResponse({ ok: true })
+      }
+      return jsonResponse({})
+    })
+    const confirm = vi.spyOn(window, 'confirm')
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true)
+
+    const wrapper = await mountWidget()
+    await flushPromises()
+    await wrapper.find('.ai-fab').trigger('click')
+    await wrapper.find('[title="对话历史"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.history-item-delete').trigger('click')
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(mockFetchWithAuth.mock.calls.some(([url, options]) => (
+      url === '/api/ai/conversations/77' && options?.method === 'DELETE'
+    ))).toBe(false)
+
+    await wrapper.find('.history-item-delete').trigger('click')
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(mockFetchWithAuth.mock.calls.some(([url, options]) => (
+      url === '/api/ai/conversations/77' && options?.method === 'DELETE'
+    ))).toBe(true)
 
     wrapper.unmount()
   })

@@ -49,6 +49,7 @@ describe('TripStarView', () => {
 
     expect(mockPush).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('TripStar 模块未启用')
+    expect(wrapper.get('.error-msg').attributes('role')).toBe('alert')
   })
 
   it('提交成功后记录最近任务，避免线上误回主页面后丢失结果', async () => {

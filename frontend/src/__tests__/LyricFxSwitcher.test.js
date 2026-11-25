@@ -25,10 +25,13 @@ describe('LyricFxSwitcher', () => {
     const wrapper = mountSwitcher()
 
     expect(wrapper.find('.fx-dropdown').classes()).not.toContain('is-open')
+    expect(wrapper.find('.fx-dropdown').attributes('aria-hidden')).toBe('true')
+    expect(wrapper.find('.fx-dropdown').attributes('inert')).toBeDefined()
 
     await wrapper.find('.fx-btn').trigger('click')
 
     expect(wrapper.find('.fx-dropdown').classes()).toContain('is-open')
+    expect(wrapper.find('.fx-dropdown').attributes('inert')).toBeUndefined()
     expect(wrapper.findAll('.fx-item')).toHaveLength(6)
 
     wrapper.unmount()

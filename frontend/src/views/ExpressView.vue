@@ -587,6 +587,9 @@ onUnmounted(() => {
         <input
           id="express-phone-input"
           v-model="phone"
+          type="tel"
+          inputmode="numeric"
+          pattern="[0-9]*"
           placeholder="如：1234"
           maxlength="4"
         />
@@ -684,16 +687,23 @@ onUnmounted(() => {
 
     <!-- 密钥配置（仅管理员） -->
     <div v-if="authStore.isAdmin" class="config-card glass-card">
-      <div class="config-header" @click="showConfig = !showConfig">
+      <button
+        class="config-header"
+        type="button"
+        data-test="express-config-toggle"
+        :aria-expanded="showConfig"
+        aria-controls="express-config-body"
+        @click="showConfig = !showConfig"
+      >
         <span>⚙️</span>
         <span>快递100 API 配置</span>
-        <div class="config-status">
+        <span class="config-status">
           <span class="status-dot" :class="configStatus.customer_configured && configStatus.key_configured ? 'ok' : 'warn'"></span>
           {{ configStatus.customer_configured && configStatus.key_configured ? '已配置' : '未配置' }}
-        </div>
+        </span>
         <span class="config-toggle">{{ showConfig ? '▲' : '▼' }}</span>
-      </div>
-      <div v-if="showConfig" class="config-body">
+      </button>
+      <div v-if="showConfig" id="express-config-body" class="config-body">
         <p class="config-tip">在 <a href="https://api.kuaidi100.com/" target="_blank">快递100开放平台</a> 注册获取授权码和密钥，配置后即可查询物流。</p>
         <div class="form-group">
           <label>授权码 customer <span class="hint">（约12位字母数字）</span> <span v-if="configStatus.customer_configured" class="configured-badge">✅ 已配置</span></label>
@@ -722,6 +732,7 @@ onUnmounted(() => {
 
 .express-page {
   max-width: 640px;
+  min-width: 0;
   margin: 0 auto;
   padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom);
   display: flex;
@@ -916,8 +927,13 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 14px;
+  min-width: 0;
 }
-.status-icon { font-size: 40px; }
+.status-icon { font-size: 40px; flex-shrink: 0; }
+.status-info {
+  flex: 1;
+  min-width: 0;
+}
 .status-text {
   font-size: 20px;
   font-weight: 700;
@@ -926,6 +942,8 @@ onUnmounted(() => {
   font-size: 13px;
   color: var(--text-secondary);
   margin-top: 4px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* 地图 */
@@ -1003,6 +1021,7 @@ onUnmounted(() => {
 }
 
 .tl-content {
+  min-width: 0;
   animation: fadeSlideIn 0.3s ease;
 }
 .tl-time {
@@ -1014,6 +1033,8 @@ onUnmounted(() => {
   font-size: 14px;
   line-height: 1.6;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .timeline-item.is-latest .tl-text {
   color: #a5b4fc;
@@ -1023,6 +1044,8 @@ onUnmounted(() => {
   font-size: 12px;
   color: var(--text-secondary);
   margin-top: 4px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 @keyframes fadeSlideIn {
@@ -1156,6 +1179,7 @@ onUnmounted(() => {
 .history-item {
   display: flex;
   align-items: center;
+  min-width: 0;
   padding: 14px 16px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.04);
@@ -1176,16 +1200,25 @@ onUnmounted(() => {
   font-weight: 600;
   font-family: 'Courier New', monospace;
   letter-spacing: 0.5px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.h-info {
+  min-width: 0;
+  flex: 1;
 }
 .h-meta {
   font-size: 12px;
   color: var(--text-secondary);
   margin-top: 2px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .h-arrow {
   margin-left: auto;
   color: var(--text-secondary);
   font-size: 18px;
+  flex-shrink: 0;
 }
 
 /* 地图标记样式 */
@@ -1208,15 +1241,29 @@ onUnmounted(() => {
 /* 密钥配置 */
 .config-card {
   border: 1px dashed rgba(255, 255, 255, 0.1);
+  min-width: 0;
 }
 .config-header {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  min-height: var(--touch-min);
+  padding: 6px 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  text-align: left;
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   user-select: none;
+}
+.config-header:focus-visible {
+  outline: 2px solid rgba(165, 180, 252, 0.9);
+  outline-offset: 3px;
+  border-radius: 8px;
 }
 .config-status {
   margin-left: auto;

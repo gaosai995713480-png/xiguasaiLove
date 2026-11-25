@@ -116,4 +116,85 @@ describe('GalleryView', () => {
     expect(mockList).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('第二张失败')
   })
+
+  it('灯箱保留可滚动长说明，照片日期是可访问按钮', async () => {
+    const longDescription = `https://example.com/${'very-long-segment-'.repeat(40)}`
+    mockList.mockResolvedValue([
+      {
+        id: 1,
+        filename: 'long.jpg',
+        url: '/photos/long.jpg',
+        description: longDescription,
+        created_at: '2026-04-16 21:00:00',
+      },
+    ])
+
+    const { default: GalleryView } = await import('../views/GalleryView.vue')
+    const wrapper = mount(GalleryView, {
+      global: {
+        stubs: {
+          TopBar: { template: '<div><slot /></div>' },
+          Teleport: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    const photoDate = wrapper.find('.photo-date')
+    expect(photoDate.element.tagName).toBe('BUTTON')
+    expect(photoDate.attributes('aria-label')).toContain('2026-04-16')
+
+    await photoDate.trigger('click')
+    expect(mockPush).toHaveBeenCalledWith('/day/2026-04-16')
+    expect(wrapper.find('.lightbox').classes()).not.toContain('is-active')
+
+    await wrapper.find('.gallery-item').trigger('click')
+    const caption = wrapper.find('.lightbox-caption')
+    expect(caption.attributes('tabindex')).toBe('0')
+    expect(caption.text()).toContain(longDescription)
+  })
+
+  it('灯箱手势忽略多指和纵向滑动，只切换单指横滑', async () => {
+    mockList.mockResolvedValue([
+      { id: 1, filename: '1.jpg', url: '/photos/1.jpg', description: '第一张' },
+      { id: 2, filename: '2.jpg', url: '/photos/2.jpg', description: '第二张' },
+      { id: 3, filename: '3.jpg', url: '/photos/3.jpg', description: '第三张' },
+    ])
+
+    const { default: GalleryView } = await import('../views/GalleryView.vue')
+    const wrapper = mount(GalleryView, {
+      global: {
+        stubs: {
+          TopBar: { template: '<div><slot /></div>' },
+          Teleport: true,
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.find('.gallery-item').trigger('click')
+
+    await wrapper.find('.lightbox-content img').trigger('touchstart', {
+      touches: [{ clientX: 100, clientY: 100 }, { clientX: 120, clientY: 120 }],
+    })
+    await wrapper.find('.lightbox-content img').trigger('touchend', {
+      changedTouches: [{ clientX: 10, clientY: 100 }],
+    })
+    expect(wrapper.find('.lightbox-counter').text()).toBe('1 / 3')
+
+    await wrapper.find('.lightbox-content img').trigger('touchstart', {
+      touches: [{ clientX: 200, clientY: 100 }],
+    })
+    await wrapper.find('.lightbox-content img').trigger('touchend', {
+      changedTouches: [{ clientX: 100, clientY: 300 }],
+    })
+    expect(wrapper.find('.lightbox-counter').text()).toBe('1 / 3')
+
+    await wrapper.find('.lightbox-content img').trigger('touchstart', {
+      touches: [{ clientX: 200, clientY: 100 }],
+    })
+    await wrapper.find('.lightbox-content img').trigger('touchend', {
+      changedTouches: [{ clientX: 100, clientY: 105 }],
+    })
+    expect(wrapper.find('.lightbox-counter').text()).toBe('2 / 3')
+  })
 })

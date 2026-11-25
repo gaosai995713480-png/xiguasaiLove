@@ -91,4 +91,30 @@ describe('MoodView', () => {
     expect(mockPush).toHaveBeenCalledWith(expect.stringMatching(/^\/day\/\d{4}-\d{2}-\d{2}$/))
     expect(wrapper.find('.mood-modal').exists()).toBe(false)
   })
+
+  it('加载失败显示错误状态并可重试，不伪装成零记录', async () => {
+    mockList
+      .mockRejectedValueOnce(new Error('请求失败 (500)'))
+      .mockResolvedValueOnce([{
+        mood_date: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`,
+        emoji: '🥰',
+        level: 4,
+        note: '重试成功',
+      }])
+
+    const wrapper = await mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[role="alert"]').text()).toContain('请求失败 (500)')
+    expect(wrapper.find('.stats').exists()).toBe(false)
+    const retry = wrapper.find('.retry-btn')
+    expect(retry.text()).toBe('重试')
+
+    await retry.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.find('.cal-grid').exists()).toBe(true)
+    expect(wrapper.text()).toContain('🥰')
+  })
 })

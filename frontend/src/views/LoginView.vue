@@ -214,6 +214,10 @@ async function handleLogin() {
 }
 
 .register-link a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch-min);
+  padding: 0 8px;
   color: var(--primary);
   text-decoration: none;
   font-weight: 600;

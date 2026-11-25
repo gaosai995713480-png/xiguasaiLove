@@ -247,10 +247,15 @@ onUnmounted(() => {
     <!-- 正常展示 -->
     <template v-else-if="weatherData">
       <div class="weather-header">
-        <div class="weather-city" @click.stop="toggleCityPanel()">
+        <button
+          type="button"
+          class="weather-city"
+          :aria-expanded="showCitySearch"
+          @click.stop="toggleCityPanel()"
+        >
           📍 {{ weatherData.city || '未知' }}
           <span class="city-search-icon">▾</span>
-        </div>
+        </button>
         <button class="weather-toggle-btn" type="button" @click.stop="toggleWeatherCard()">
           {{ isCollapsed ? '展开' : '收起' }}
         </button>
@@ -271,7 +276,15 @@ onUnmounted(() => {
             class="city-search-input"
           />
           <ul class="city-search-results" v-if="citySearchQuery && citySearchResults.length">
-            <li v-for="d in citySearchResults" :key="d.adcode" @click="selectCity(d)">
+            <li
+              v-for="d in citySearchResults"
+              :key="d.adcode"
+              role="button"
+              tabindex="0"
+              @click="selectCity(d)"
+              @keydown.enter.prevent="selectCity(d)"
+              @keydown.space.prevent="selectCity(d)"
+            >
               <span>{{ d.name }}</span>
               <span class="city-level">{{ levelLabel(d.level) }}</span>
             </li>
@@ -285,7 +298,15 @@ onUnmounted(() => {
               </template>
             </div>
             <ul class="city-search-results" v-if="districtList.length">
-              <li v-for="d in districtList" :key="d.adcode" @click="drillDown(d)">
+              <li
+                v-for="d in districtList"
+                :key="d.adcode"
+                role="button"
+                tabindex="0"
+                @click="drillDown(d)"
+                @keydown.enter.prevent="drillDown(d)"
+                @keydown.space.prevent="drillDown(d)"
+              >
                 <span>{{ d.name }}</span>
                 <span class="city-level">{{ levelLabel(d.level) }} ›</span>
               </li>
@@ -335,9 +356,15 @@ onUnmounted(() => {
 .weather-city {
   font-size: 13px; color: var(--text-secondary); cursor: pointer;
   display: flex; align-items: center; gap: 4px;
+  min-height: var(--touch-min); padding: 0; border: none; background: transparent;
   transition: color 0.2s;
 }
 .weather-city:hover { color: var(--text-primary); }
+.weather-city:focus-visible,
+.city-search-results li:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .city-search-icon { font-size: 10px; opacity: 0.6; transition: transform 0.2s; }
 .weather-toggle-btn {
   padding: 4px 10px; border-radius: 999px;
@@ -405,7 +432,7 @@ onUnmounted(() => {
   max-height: 160px; overflow-y: auto;
 }
 .city-search-results li {
-  padding: 6px 10px; cursor: pointer;
+  min-height: var(--touch-min); padding: 8px 10px; cursor: pointer;
   border-radius: 6px; font-size: 13px;
   display: flex; justify-content: space-between; align-items: center;
   transition: background 0.15s;

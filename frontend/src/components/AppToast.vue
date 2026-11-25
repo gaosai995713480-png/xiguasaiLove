@@ -6,7 +6,14 @@ const { toast } = useToast()
 
 <template>
   <Transition name="toast-slide">
-    <div v-if="toast.visible" class="app-toast" :class="`toast--${toast.type}`">
+    <div
+      v-if="toast.visible"
+      class="app-toast"
+      :class="`toast--${toast.type}`"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
       <span class="toast-icon">
         {{ toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : toast.type === 'warning' ? '⚠️' : 'ℹ️' }}
       </span>

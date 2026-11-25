@@ -156,7 +156,12 @@ onMounted(() => loadRequests())
             <div class="sr-title">{{ r.name }}</div>
             <div class="sr-artist">{{ r.artist?.join?.(' / ') || r.artist }}</div>
           </div>
-          <button class="sr-recommend-btn" title="推荐这首歌">🎤</button>
+          <button
+            class="sr-recommend-btn"
+            type="button"
+            :aria-label="`推荐歌曲 ${r.name}`"
+            title="推荐这首歌"
+          >🎤</button>
         </div>
       </div>
     </div>
@@ -186,18 +191,28 @@ onMounted(() => loadRequests())
           <div class="rc-footer">
             <span class="rc-nickname">— {{ item.nickname }}</span>
             <div class="rc-actions">
-              <button class="rc-like-btn" @click="likeRequest(item)">
+              <button
+                class="rc-like-btn"
+                type="button"
+                :aria-label="`为 ${item.song_name} 点赞`"
+                @click="likeRequest(item)"
+              >
                 ❤️ {{ item.likes }}
               </button>
               <span class="rc-adopted-badge" v-if="item.is_adopted">✅ 已采纳</span>
               <button
                 v-else-if="authStore.isAdmin"
                 class="rc-adopt-btn"
+                type="button"
+                :aria-label="`采纳 ${item.song_name}`"
                 @click="adoptRequest(item)"
               >📥 采纳</button>
               <button
                 v-if="authStore.isAdmin"
                 class="rc-remove-btn"
+                type="button"
+                :aria-label="`移除 ${item.song_name} 的推荐`"
+                title="移除推荐"
                 @click="removeRequest(item)"
               >✕</button>
             </div>
@@ -229,6 +244,7 @@ onMounted(() => loadRequests())
       </div>
       <button
         class="btn-primary rf-submit"
+        type="button"
         @click="submitRecommend"
         :disabled="submitting"
       >{{ submitting ? '推荐中...' : '🎵 推荐这首歌' }}</button>
@@ -267,9 +283,9 @@ onMounted(() => loadRequests())
   color: var(--text-secondary); text-align: center;
 }
 
-.search-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.search-row { display: flex; gap: 8px; margin-bottom: 12px; min-width: 0; }
 .search-row input {
-  flex: 1; padding: 10px 14px; border-radius: 10px;
+  flex: 1; min-width: 0; padding: 10px 14px; border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.06);
   color: #fff; font-size: 14px; outline: none;
@@ -296,7 +312,7 @@ onMounted(() => loadRequests())
 }
 
 .sr-recommend-btn {
-  width: 36px; height: 36px; border-radius: 50%;
+  width: var(--touch-min); height: var(--touch-min); border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.08);
   font-size: 18px; cursor: pointer;
@@ -367,6 +383,8 @@ onMounted(() => loadRequests())
 .rc-actions { display: flex; gap: 8px; align-items: center; }
 
 .rc-like-btn {
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
   padding: 4px 12px; border-radius: 8px; border: none;
   background: rgba(255, 107, 157, 0.12);
   color: var(--primary); font-size: 13px;
@@ -378,6 +396,8 @@ onMounted(() => loadRequests())
 }
 
 .rc-adopt-btn {
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
   padding: 4px 12px; border-radius: 8px; border: none;
   background: rgba(52, 211, 153, 0.15);
   color: #34d399; font-size: 13px;
@@ -395,7 +415,7 @@ onMounted(() => loadRequests())
 }
 
 .rc-remove-btn {
-  width: 28px; height: 28px; border-radius: 50%; border: none;
+  width: var(--touch-min); height: var(--touch-min); border-radius: 50%; border: none;
   background: transparent; color: rgba(255, 255, 255, 0.3);
   font-size: 14px; cursor: pointer; transition: all 0.2s;
   display: flex; align-items: center; justify-content: center;
@@ -446,6 +466,7 @@ onMounted(() => loadRequests())
   }
 
   .search-row .btn-primary {
+    flex: 0 0 auto;
     padding: 10px 14px;
     font-size: 13px;
   }

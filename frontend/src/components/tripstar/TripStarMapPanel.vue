@@ -243,6 +243,11 @@ function clearOverlays() {
   overlays = []
 }
 
+function shouldLockMapGestures() {
+  return typeof window.matchMedia === 'function'
+    && window.matchMedia('(max-width: 760px)').matches
+}
+
 function renderMap(AMap) {
   if (!mapEl.value) return
   if (!attractions.value.length) {
@@ -253,10 +258,13 @@ function renderMap(AMap) {
   }
 
   if (!mapInstance) {
+    const lockGestures = shouldLockMapGestures()
     mapInstance = new AMap.Map(mapEl.value, {
       zoom: 12,
       center: center.value,
       viewMode: '2D',
+      dragEnable: !lockGestures,
+      touchZoom: !lockGestures,
     })
   }
 
@@ -368,6 +376,7 @@ onUnmounted(() => {
     <p class="map-desc">
       展示每日景点点位与步行路线；后端路线/POI 接口使用高德 Web 服务 Key，前端渲染使用高德 Web端 Key。
     </p>
+    <p class="map-mobile-hint">手机端地图已锁定拖拽，避免抢占页面滚动；可点击下方景点按钮定位。</p>
 
     <p v-if="loading" class="map-tip">正在加载高德地图...</p>
     <p v-if="errorMsg" class="map-error">{{ errorMsg }}</p>
@@ -407,6 +416,7 @@ onUnmounted(() => {
 <style scoped>
 .tripstar-map-card {
   grid-column: span 2;
+  min-width: 0;
   padding: 26px;
 }
 
@@ -415,6 +425,7 @@ onUnmounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+  min-width: 0;
 }
 
 .eyebrow {
@@ -454,10 +465,19 @@ h2 {
 .map-error {
   color: var(--text-secondary);
   line-height: 1.7;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .map-error {
   color: #fca5a5;
+}
+
+.map-mobile-hint {
+  display: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .map-canvas {
@@ -468,6 +488,7 @@ h2 {
   background:
     linear-gradient(135deg, rgba(56, 189, 248, 0.08), rgba(167, 139, 250, 0.08)),
     rgba(255, 255, 255, 0.04);
+  touch-action: pan-y;
 }
 
 .map-canvas.hidden {
@@ -484,6 +505,8 @@ h2 {
 .point-chip {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 999px;
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
   padding: 9px 13px;
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
@@ -512,6 +535,7 @@ h2 {
   grid-template-columns: 72px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
+  min-width: 0;
   padding: 10px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--text-secondary);
@@ -530,6 +554,8 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .route-row em {
@@ -545,6 +571,10 @@ h2 {
 
   .map-canvas {
     height: 320px;
+  }
+
+  .map-mobile-hint {
+    display: block;
   }
 
   .route-row {

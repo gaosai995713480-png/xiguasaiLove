@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import TopBar from '../components/TopBar.vue'
 import { wishApi } from '../api'
@@ -9,7 +9,9 @@ const wishes = ref([])
 const modalVisible = ref(false)
 const modalPos = ref({ left: '0', top: '0' })
 const wishInput = ref('')
+const wishInputEl = ref(null)
 const submitting = ref(false)
+const activeWishId = ref(null)
 let pendingPos = null
 
 function createBackgroundStars() {
@@ -38,6 +40,11 @@ function spawnShootingStar() {
 function onSkyClick(e) {
   if (submitting.value) return
   if (e.target.closest('.star') || e.target.closest('.top-bar')) return
+  if (modalVisible.value) {
+    modalVisible.value = false
+    return
+  }
+  activeWishId.value = null
   pendingPos = {
     x: e.clientX / window.innerWidth,
     y: e.clientY / window.innerHeight,
@@ -52,7 +59,30 @@ function onSkyClick(e) {
     }
   }
   modalVisible.value = true
-  wishInput.value = ''
+  nextTick(() => wishInputEl.value?.focus())
+}
+
+function closeWishModal() {
+  if (submitting.value) return
+  modalVisible.value = false
+}
+
+function toggleWish(id) {
+  activeWishId.value = activeWishId.value === id ? null : id
+}
+
+function wishTextStyle(wish) {
+  const left = `clamp(12px, calc(${wish.x * 100}% - 90px), calc(100% - 192px))`
+  if (wish.y > 0.68) {
+    return {
+      left,
+      bottom: `max(calc(var(--tabbar-height) + 12px), calc(${(1 - wish.y) * 100}% + 10px))`,
+    }
+  }
+  return {
+    left,
+    top: `clamp(calc(var(--topbar-actual-height) + 12px), calc(${wish.y * 100}% + 10px), calc(100% - var(--tabbar-height) - 140px))`,
+  }
 }
 
 async function submitWish() {
@@ -67,6 +97,7 @@ async function submitWish() {
     if (data.ok) {
       wishes.value.push({ id: data.id, content, x: position.x, y: position.y, color })
       modalVisible.value = false
+      wishInput.value = ''
       if (pendingPos === position) pendingPos = null
     }
   } catch { /* ignore */ }
@@ -76,8 +107,9 @@ async function submitWish() {
 }
 
 function onInputKeydown(e) {
+  if (e.isComposing) return
   if (e.key === 'Enter' && !submitting.value) submitWish()
-  if (e.key === 'Escape' && !submitting.value) modalVisible.value = false
+  if (e.key === 'Escape' && !submitting.value) closeWishModal()
 }
 
 async function loadWishes() {
@@ -110,10 +142,25 @@ onUnmounted(() => {
       v-for="w in wishes"
       :key="w.id"
       class="star"
-      :style="{ left: (w.x * 100) + '%', top: (w.y * 100) + '%' }"
+      :class="{
+        'is-active': activeWishId === w.id,
+        'edge-left': w.x < 0.2,
+        'edge-right': w.x > 0.8,
+      }"
+      :style="{
+        left: `clamp(22px, ${w.x * 100}%, calc(100% - 22px))`,
+        top: `clamp(calc(var(--topbar-actual-height) + 22px), ${w.y * 100}%, calc(100% - var(--tabbar-height) - 22px))`,
+      }"
+      role="button"
+      tabindex="0"
+      :aria-label="`${w.content}，点击${activeWishId === w.id ? '收起' : '查看'}愿望文字`"
+      :aria-expanded="activeWishId === w.id"
+      @click.stop="toggleWish(w.id)"
+      @keydown.enter.prevent="toggleWish(w.id)"
+      @keydown.space.prevent="toggleWish(w.id)"
     >
       <div class="star-dot" :style="{ color: w.color, background: w.color }"></div>
-      <div class="star-text">{{ w.content }}</div>
+      <div class="star-text" :style="wishTextStyle(w)" @click.stop>{{ w.content }}</div>
     </div>
   </div>
 
@@ -123,16 +170,35 @@ onUnmounted(() => {
     class="wish-modal"
     :class="{ 'is-visible': modalVisible }"
     :style="modalPos"
+    role="dialog"
+    aria-modal="true"
+    aria-label="写下心愿"
+    :aria-hidden="!modalVisible"
+    :inert="!modalVisible"
+    @click.stop
   >
-    <input
-      v-model="wishInput"
-      type="text"
-      placeholder="写下你的心愿..."
-      maxlength="50"
+    <button
+      class="wish-close"
+      type="button"
+      aria-label="关闭许愿框"
       :disabled="submitting"
-      @keydown="onInputKeydown"
-    />
-    <button :disabled="submitting" @click="submitWish">{{ submitting ? '正在许愿...' : '许愿 ⭐' }}</button>
+      @click.stop="closeWishModal"
+    >✕</button>
+    <div class="wish-modal-row">
+      <input
+        ref="wishInputEl"
+        v-model="wishInput"
+        type="text"
+        aria-label="写下你的心愿"
+        placeholder="写下你的心愿..."
+        maxlength="50"
+        :disabled="submitting"
+        @keydown="onInputKeydown"
+      />
+      <button class="wish-submit" :disabled="submitting" @click="submitWish">
+        {{ submitting ? '正在许愿...' : '许愿 ⭐' }}
+      </button>
+    </div>
   </div>
 </template>
 
@@ -153,24 +219,58 @@ onUnmounted(() => {
 }
 
 .star {
-  position: absolute; z-index: 2; text-align: center; cursor: default;
-  transform: translate(-50%, -50%);
+  position: absolute; z-index: 2; width: 44px; height: 44px;
+  margin-left: -22px; margin-top: -22px;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center; cursor: pointer; border-radius: 50%;
+  touch-action: manipulation;
 }
 
 .star-dot {
   width: 6px; height: 6px; border-radius: 50%;
   animation: twinkle 2s ease-in-out infinite alternate;
-  box-shadow: 0 0 8px 2px currentColor; margin: 0 auto 4px;
+  box-shadow: 0 0 8px 2px currentColor; pointer-events: none;
+  transition: transform 0.2s;
 }
 
 .star-text {
-  font-size: 11px; color: rgba(255, 255, 255, 0.7);
-  max-width: 120px; word-break: break-all;
-  opacity: 0; transition: opacity 0.3s;
+  position: fixed;
+  z-index: 4;
+  width: min(180px, calc(100vw - 24px));
+  max-height: min(160px, calc(100dvh - 140px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(4, 8, 18, 0.82);
+  font-size: 12px; line-height: 1.55; color: rgba(255, 255, 255, 0.88);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+  text-align: center;
+  opacity: 0; pointer-events: none; transition: opacity 0.3s;
   text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
 }
 
-.star:hover .star-text { opacity: 1; }
+.star.edge-left .star-text { text-align: left; }
+.star.edge-right .star-text { text-align: right; }
+
+.star.is-active .star-text,
+.star:focus-visible .star-text {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.star.is-active .star-dot {
+  transform: scale(1.55);
+}
+
+.star:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+@media (hover: hover) {
+  .star:hover .star-text { opacity: 1; }
+}
 
 :deep(.bg-star) {
   position: absolute; width: 2px; height: 2px; border-radius: 50%;
@@ -192,7 +292,7 @@ onUnmounted(() => {
 }
 
 .wish-modal {
-  position: fixed; z-index: 20; padding: 16px; border-radius: 16px;
+  position: fixed; z-index: 20; padding: 52px 16px 16px; border-radius: 16px;
   background: rgba(10, 14, 26, 0.9); backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 215, 0, 0.2);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
@@ -201,17 +301,33 @@ onUnmounted(() => {
 
 .wish-modal.is-visible { opacity: 1; pointer-events: auto; transform: scale(1); }
 
+.wish-modal-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wish-close {
+  position: absolute; top: 6px; right: 6px;
+  width: 44px; height: 44px; border: none; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.8);
+  font-size: 18px; cursor: pointer;
+}
+
+.wish-close:disabled { opacity: 0.45; cursor: not-allowed; }
+
 .wish-modal input {
   width: 200px; padding: 8px 12px; border-radius: 8px;
   border: 1px solid rgba(255, 215, 0, 0.3); background: rgba(255, 255, 255, 0.05);
   color: #ffd700; font-size: 14px; outline: none;
+  min-height: 44px;
 }
 
 .wish-modal input::placeholder { color: rgba(255, 215, 0, 0.4); }
 .wish-modal input:focus { border-color: #ffd700; }
 
-.wish-modal button {
-  margin-top: 8px; width: 100%; padding: 6px; border-radius: 8px; border: none;
+.wish-submit {
+  width: 100%; padding: 8px; border-radius: 8px; border: none;
   background: linear-gradient(135deg, #ffd700, #ffaa00);
   color: #1a0e2e; font-weight: 700; font-size: 13px; cursor: pointer;
 }
@@ -222,19 +338,23 @@ onUnmounted(() => {
     right: 16px !important;
     top: auto !important;
     bottom: calc(12px + var(--tabbar-height)) !important;
-    display: flex;
-    gap: 8px;
+    padding: 52px 16px 16px;
+  }
+
+  .wish-modal-row {
+    flex-direction: row;
     align-items: center;
   }
 
   .wish-modal input {
     width: auto;
     flex: 1;
+    min-width: 0;
   }
 
-  .wish-modal button {
-    margin-top: 0;
+  .wish-submit {
     width: auto;
+    flex: 0 0 auto;
     padding: 8px 16px;
     white-space: nowrap;
     min-height: var(--touch-min);

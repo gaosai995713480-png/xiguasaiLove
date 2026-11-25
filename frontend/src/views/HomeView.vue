@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useMusicStore } from '../stores/music'
@@ -11,15 +11,24 @@ import WeatherCard from '../components/WeatherCard.vue'
 import DanmuBar from '../components/DanmuBar.vue'
 import CapsuleSection from '../components/CapsuleSection.vue'
 import MemoryCard from '../components/MemoryCard.vue'
+import { useToast } from '../composables/useToast'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const musicStore = useMusicStore()
 const themeStore = useThemeStore()
 const lyricFxStore = useLyricFxStore()
+const { error: toastError } = useToast()
 
 const weatherRef = ref(null)
 const danmuRef = ref(null)
+
+watch(
+  () => musicStore.playError,
+  (message) => {
+    if (message) toastError(message, 5000)
+  },
+)
 
 // ===== Together Days =====
 const TOGETHER_START = '2023-10-26'
@@ -120,7 +129,13 @@ async function logout() {
   </main>
 
   <!-- 音乐播放按钮 -->
-  <button class="play-button" :class="{ 'is-playing': musicStore.isPlaying }" @click="musicStore.togglePlay">
+  <button
+    class="play-button"
+    :class="{ 'is-playing': musicStore.isPlaying }"
+    :aria-label="musicStore.bgmBlocked ? `点击播放背景音乐：${musicStore.bgm?.title || '背景音乐'}` : '播放或暂停背景音乐'"
+    :title="musicStore.bgmBlocked ? `点击播放：${musicStore.bgm?.title || '背景音乐'}` : '播放或暂停背景音乐'"
+    @click="musicStore.togglePlay"
+  >
     <span>{{ musicStore.isPlaying ? '⏸' : '▶' }}</span>
   </button>
 
@@ -405,7 +420,7 @@ async function logout() {
 .play-button span { position: relative; z-index: 1; }
 
 .bgm-hint {
-  position: fixed; right: calc(var(--fab-right) + 76px); bottom: calc(var(--fab-bottom) + 12px); z-index: 4;
+  position: fixed; right: calc(var(--fab-right) + 68px); bottom: calc(var(--fab-bottom) + 76px); z-index: 4;
   padding: 8px 14px; border-radius: 999px;
   background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 13px;
   cursor: pointer; backdrop-filter: blur(6px);
@@ -463,6 +478,10 @@ async function logout() {
     width: 52px;
     height: 52px;
     font-size: 20px;
+  }
+
+  .bgm-hint {
+    display: none;
   }
 }
 </style>

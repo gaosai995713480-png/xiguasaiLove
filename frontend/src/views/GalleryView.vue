@@ -107,12 +107,35 @@ function onKeydown(e) {
   if (e.key === 'ArrowRight') navigate(1)
 }
 
-// Touch swipe
-let touchStartX = 0
-function onTouchStart(e) { touchStartX = e.touches[0].clientX }
+// Touch swipe：只响应从始至终的单指横向手势。
+let touchGesture = null
+function onTouchStart(e) {
+  if (e.touches?.length !== 1) {
+    touchGesture = null
+    return
+  }
+  touchGesture = {
+    x: e.touches[0].clientX,
+    y: e.touches[0].clientY,
+  }
+}
+
 function onTouchEnd(e) {
-  const dx = e.changedTouches[0].clientX - touchStartX
-  if (Math.abs(dx) > 50) navigate(dx > 0 ? -1 : 1)
+  if (!touchGesture || e.changedTouches?.length !== 1) {
+    touchGesture = null
+    return
+  }
+  const touch = e.changedTouches[0]
+  const dx = touch.clientX - touchGesture.x
+  const dy = touch.clientY - touchGesture.y
+  touchGesture = null
+
+  const isHorizontal = Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.25
+  if (isHorizontal) navigate(dx > 0 ? -1 : 1)
+}
+
+function onTouchCancel() {
+  touchGesture = null
 }
 
 // ===== 删除 =====
@@ -248,7 +271,13 @@ onBeforeUnmount(() => {
       >
         <img :src="photo.thumbnail_url || photo.url" :alt="photo.description || `照片 ${i + 1}`" loading="lazy" />
         <div class="photo-info" v-if="photo.description || photo.created_at">
-          <p class="photo-date" v-if="photoDay(photo.created_at)" @click.stop="goPhotoDay(photo)">{{ photoDay(photo.created_at) }}</p>
+          <button
+            v-if="photoDay(photo.created_at)"
+            class="photo-date"
+            type="button"
+            :aria-label="`查看 ${photoDay(photo.created_at)} 这一天的记录`"
+            @click.stop="goPhotoDay(photo)"
+          >📅 {{ photoDay(photo.created_at) }}</button>
           <p class="photo-desc" v-if="photo.description">{{ photo.description }}</p>
         </div>
       </div>
@@ -268,8 +297,14 @@ onBeforeUnmount(() => {
             :alt="photos[currentIndex]?.description || '大图'"
             @touchstart="onTouchStart"
             @touchend="onTouchEnd"
+            @touchcancel="onTouchCancel"
           />
-          <div class="lightbox-caption" v-if="photos[currentIndex]?.description || photos[currentIndex]?.created_at">
+          <div
+            v-if="photos[currentIndex]?.description || photos[currentIndex]?.created_at"
+            class="lightbox-caption"
+            tabindex="0"
+            aria-label="照片说明，可滚动查看"
+          >
             <span class="caption-date" v-if="photos[currentIndex]?.created_at">{{ photos[currentIndex].created_at }}</span>
             <p class="caption-desc" v-if="photos[currentIndex]?.description">{{ photos[currentIndex].description }}</p>
           </div>
@@ -443,6 +478,7 @@ onBeforeUnmount(() => {
 }
 
 .gallery {
+  min-width: 0;
   padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom);
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -452,6 +488,7 @@ onBeforeUnmount(() => {
 }
 
 .gallery-item {
+  min-width: 0;
   border-radius: 16px;
   overflow: hidden;
   cursor: pointer;
@@ -474,17 +511,26 @@ onBeforeUnmount(() => {
 }
 
 .photo-info {
+  min-width: 0;
   padding: 12px 14px;
   background: rgba(25, 25, 40, 0.9);
   border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .photo-date {
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 4px;
+  border: none;
+  background: transparent;
   font-size: 11px;
   color: rgba(255, 255, 255, 0.35);
-  margin: 0 0 4px 0;
+  margin: 0 0 2px 0;
   letter-spacing: 0.5px;
   cursor: pointer;
+  text-align: left;
 }
 
 .photo-date:hover {
@@ -492,10 +538,13 @@ onBeforeUnmount(() => {
 }
 
 .photo-desc {
+  min-width: 0;
   font-size: 13px;
   color: rgba(255, 255, 255, 0.85);
   margin: 0;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .empty-state {
@@ -510,7 +559,9 @@ onBeforeUnmount(() => {
   position: fixed; inset: 0; z-index: 100;
   background: rgba(0, 0, 0, 0.92);
   backdrop-filter: blur(20px);
-  display: flex; align-items: center; justify-content: center;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px;
+  padding: calc(64px + var(--safe-top)) calc(12px + var(--safe-right)) calc(12px + var(--safe-bottom)) calc(12px + var(--safe-left));
   opacity: 0; pointer-events: none;
   transition: opacity 0.3s;
 }
@@ -521,22 +572,36 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  max-width: 92vw;
-  max-height: 90vh;
+  justify-content: center;
+  width: 100%;
+  max-width: min(92vw, 900px);
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  gap: 10px;
+  overflow: hidden;
 }
 
 .lightbox-content img {
+  display: block;
+  width: auto;
   max-width: 100%;
-  max-height: calc(90vh - 80px); /* 留出底部文字的空间 */
+  max-height: 100%;
+  min-height: 0;
+  flex: 0 1 auto;
   border-radius: 12px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
   object-fit: contain;
 }
 
 .lightbox-caption {
-  margin-top: 16px;
+  width: 100%;
+  max-width: 100%;
+  max-height: min(26dvh, 180px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 6px 6px;
   text-align: center;
-  max-width: 800px;
 }
 
 .caption-date {
@@ -544,6 +609,8 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.5);
   margin-bottom: 6px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .caption-desc {
@@ -551,6 +618,8 @@ onBeforeUnmount(() => {
   color: #fff;
   margin: 0;
   line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .lightbox-close {
@@ -578,8 +647,12 @@ onBeforeUnmount(() => {
 .lightbox-next { right: max(12px, var(--safe-right)); }
 
 .lightbox-bottom {
-  position: absolute; bottom: calc(16px + var(--safe-bottom)); left: 50%; transform: translateX(-50%);
-  display: flex; align-items: center; gap: 16px;
+  position: static;
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+  gap: 8px 12px;
+  width: 100%;
+  max-width: min(92vw, 900px);
+  flex: 0 0 auto;
 }
 
 .lightbox-counter {
@@ -588,7 +661,7 @@ onBeforeUnmount(() => {
 }
 
 .lightbox-delete {
-  padding: 6px 16px; border-radius: 20px;
+  min-height: 44px; padding: 6px 16px; border-radius: 20px;
   background: rgba(220, 50, 50, 0.7); border: none;
   color: #fff; font-size: 13px; cursor: pointer;
   transition: all 0.2s; white-space: nowrap;
@@ -598,7 +671,7 @@ onBeforeUnmount(() => {
 .lightbox-delete:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .lightbox-day {
-  padding: 6px 16px; border-radius: 20px;
+  min-height: 44px; padding: 6px 16px; border-radius: 20px;
   background: rgba(255, 255, 255, 0.16); border: none;
   color: #fff; font-size: 13px; cursor: pointer;
   transition: all 0.2s; white-space: nowrap;
@@ -631,5 +704,6 @@ onBeforeUnmount(() => {
   .gallery-action-btn { padding: 8px 10px; font-size: 12px; min-height: var(--touch-min); }
   .photo-count { display: none; }
   .empty-state { padding: var(--page-pad-top) 24px var(--page-pad-bottom); }
+  .lightbox-caption { max-height: min(24dvh, 150px); }
 }
 </style>

@@ -20,10 +20,12 @@
 
   --topbar-content: 56px;
   --topbar-height: calc(var(--topbar-content) + var(--safe-top));
+  /* TopBar 通过 ResizeObserver 写入实际像素高度；无 TopBar 时回退到基础高度。 */
+  --topbar-actual-height: var(--topbar-height);
   --tabbar-content: 0px;
   --tabbar-height: 0px;
   --page-pad-x: 24px;
-  --page-pad-top: calc(var(--topbar-height) + 20px);
+  --page-pad-top: calc(var(--topbar-actual-height) + 20px);
   --page-pad-bottom: 60px;
   --fab-bottom: calc(24px + var(--safe-bottom));
   --fab-right: calc(24px + var(--safe-right));
@@ -36,7 +38,7 @@
     --tabbar-content: 56px;
     --tabbar-height: calc(var(--tabbar-content) + var(--safe-bottom));
     --page-pad-x: 14px;
-    --page-pad-top: calc(var(--topbar-height) + 12px);
+    --page-pad-top: calc(var(--topbar-actual-height) + 12px);
     --page-pad-bottom: calc(var(--tabbar-height) + 20px);
     --fab-bottom: calc(var(--tabbar-height) + 12px);
     --fab-right: calc(12px + var(--safe-right));

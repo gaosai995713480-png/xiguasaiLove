@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
@@ -59,6 +59,7 @@ const tabs = [
 
 const moreItems = computed(() => {
   const items = [
+    { key: 'ai', action: 'ai', icon: '🤖', label: 'AI 助手', desc: '向 AI 提问，整理回忆' },
     ...groups.find((g) => g.key === 'romance').items.filter((item) => item.to !== '/mood'),
     ...groups.find((g) => g.key === 'music').items.filter((item) => item.to !== '/music'),
     ...groups.find((g) => g.key === 'tools').items,
@@ -70,6 +71,13 @@ const moreItems = computed(() => {
 })
 
 const activePanel = ref(null)
+
+watch(
+  () => route.path,
+  () => {
+    activePanel.value = null
+  },
+)
 
 const panelData = computed(() => {
   if (!activePanel.value) return null
@@ -117,6 +125,19 @@ function onTabClick(tab) {
 function navigateTo(to) {
   activePanel.value = null
   router.push(to)
+}
+
+function openAssistant() {
+  activePanel.value = null
+  window.dispatchEvent(new CustomEvent('ai-chat:open'))
+}
+
+function handlePanelItem(item) {
+  if (item.action === 'ai') {
+    openAssistant()
+    return
+  }
+  navigateTo(item.to)
 }
 
 function closePanel() {
@@ -170,10 +191,10 @@ function closePanel() {
           <div class="panel-grid">
             <button
               v-for="item in panelData.items"
-              :key="item.to"
+              :key="item.key || item.to"
               class="panel-item"
               type="button"
-              @click="navigateTo(item.to)"
+              @click="handlePanelItem(item)"
             >
               <span class="pi-icon">{{ item.icon }}</span>
               <span class="pi-label">{{ item.label }}</span>

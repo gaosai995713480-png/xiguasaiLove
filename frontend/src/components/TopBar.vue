@@ -1,10 +1,16 @@
+<script>
+let nextTopBarId = 0
+let activeTopBarId = 0
+</script>
+
 <script setup>
-import { getCurrentInstance } from 'vue'
+import { getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ThemeSwitcher from './ThemeSwitcher.vue'
 
-defineProps({
+const props = defineProps({
   title: { type: String, default: '' },
+  subtitle: { type: String, default: '' },
   showBack: { type: Boolean, default: true },
   showTheme: { type: Boolean, default: true },
 })
@@ -12,6 +18,46 @@ defineProps({
 const emit = defineEmits(['back'])
 const router = useRouter()
 const instance = getCurrentInstance()
+const barRef = ref(null)
+const topBarId = ++nextTopBarId
+let resizeObserver = null
+
+function updateActualHeight() {
+  const height = barRef.value?.getBoundingClientRect().height
+  if (!height) return
+  document.documentElement.style.setProperty('--topbar-actual-height', `${Math.ceil(height)}px`)
+}
+
+onMounted(async () => {
+  activeTopBarId = topBarId
+  await nextTick()
+  updateActualHeight()
+
+  if (typeof ResizeObserver !== 'undefined' && barRef.value) {
+    resizeObserver = new ResizeObserver(updateActualHeight)
+    resizeObserver.observe(barRef.value)
+  }
+  window.addEventListener('resize', updateActualHeight)
+})
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  window.removeEventListener('resize', updateActualHeight)
+
+  if (activeTopBarId === topBarId) {
+    activeTopBarId = 0
+    document.documentElement.style.removeProperty('--topbar-actual-height')
+  }
+})
+
+watch(
+  () => [props.title, props.subtitle],
+  async () => {
+    await nextTick()
+    updateActualHeight()
+  },
+)
 
 function hasCustomBackListener() {
   const listener = instance?.vnode?.props?.onBack
@@ -34,9 +80,12 @@ function handleBack() {
 </script>
 
 <template>
-  <div class="top-bar">
+  <div ref="barRef" class="top-bar">
     <a v-if="showBack" class="back-btn" @click.prevent="handleBack" href="#">← 返回</a>
-    <h1>{{ title }}</h1>
+    <div class="title-block">
+      <h1>{{ title }}</h1>
+      <p v-if="subtitle" class="subtitle">{{ subtitle }}</p>
+    </div>
     <slot />
     <ThemeSwitcher v-if="showTheme" />
   </div>
@@ -77,6 +126,10 @@ function handleBack() {
   transform: translateY(-1px);
 }
 
+.title-block {
+  min-width: 0;
+}
+
 h1 {
   font-size: 18px;
   font-weight: 700;
@@ -84,6 +137,16 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+
+.subtitle {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @media (max-width: 720px) {

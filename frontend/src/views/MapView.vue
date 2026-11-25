@@ -24,6 +24,8 @@ const form = ref(createEmptyForm())
 const uploading = ref(false)
 const carouselIndex = ref(0)
 const mapError = ref('')
+const mapReady = ref(false)
+const mapLoading = ref(false)
 let editingId = null
 let map = null
 let mapMarkers = []
@@ -43,7 +45,7 @@ function createEmptyForm() {
 
 // 地图初始化（需要等高德 SDK 加载完毕）
 function initMap() {
-  if (!window.AMap) return
+  if (!window.AMap?.Map) throw new Error('高德地图 SDK 未就绪')
   map = new AMap.Map('map-container', {
     zoom: 5,
     center: [114.3, 30.6],
@@ -51,6 +53,7 @@ function initMap() {
     viewMode: '2D',
   })
   map.on('click', onMapClick)
+  mapReady.value = true
   loadMarkers()
 }
 
@@ -183,6 +186,18 @@ function clearMapMarkers() {
   if (polyline) { map.remove(polyline); polyline = null }
 }
 
+function destroyMapInstance() {
+  clearMapMarkers()
+  mapMarkers = []
+  polyline = null
+  if (map) {
+    map.off('click', onMapClick)
+    if (typeof map.destroy === 'function') map.destroy()
+    map = null
+  }
+  mapReady.value = false
+}
+
 function renderMapMarkers(data) {
   clearMapMarkers()
   data.forEach(item => {
@@ -192,7 +207,7 @@ function renderMapMarkers(data) {
     const marker = new AMap.Marker({
       position: [item.lng, item.lat],
       content,
-      offset: new AMap.Pixel(-16, -16),
+      offset: new AMap.Pixel(-22, -22),
     })
     marker.on('click', () => openDetail(item))
     map.add(marker)
@@ -238,6 +253,10 @@ function initSearch() {
 
 function onSearchInput() {
   clearTimeout(searchTimer)
+  if (!mapReady.value) {
+    searchVisible.value = false
+    return
+  }
   const kw = searchInput.value.trim()
   if (!kw) { searchVisible.value = false; return }
   searchTimer = setTimeout(() => {
@@ -258,6 +277,7 @@ function onSearchInput() {
 }
 
 function selectSearchResult(r) {
+  if (!map) return
   map.setZoomAndCenter(15, [r.lng, r.lat])
   searchInput.value = r.name
   searchVisible.value = false
@@ -271,31 +291,44 @@ function loadAmapSDK() {
   })
 }
 
-onMounted(async () => {
-  viewActive = true
+async function initMapView() {
+  if (mapLoading.value) return
+  mapLoading.value = true
+  mapReady.value = false
   mapError.value = ''
+  searchVisible.value = false
+  searchResultsData.value = []
   try {
+    destroyMapInstance()
     await loadAmapSDK()
     if (!viewActive) return
     initMap()
     initSearch()
   } catch (error) {
     if (!viewActive) return
+    destroyMapInstance()
     mapError.value = error?.message || '高德地图加载失败'
+  } finally {
+    mapLoading.value = false
   }
+}
+
+function retryMap() {
+  if (mapLoading.value) return
+  initMapView()
+}
+
+onMounted(() => {
+  viewActive = true
+  initMapView()
 })
 
 onUnmounted(() => {
   viewActive = false
+  mapReady.value = false
   revokeLocalPhotoDrafts(form.value.photos)
   if (searchTimer) clearTimeout(searchTimer)
-  clearMapMarkers()
-  if (map) {
-    map.off('click', onMapClick)
-    if (typeof map.destroy === 'function') {
-      map.destroy()
-    }
-  }
+  destroyMapInstance()
 })
 </script>
 
@@ -306,9 +339,15 @@ onUnmounted(() => {
 
   <!-- Search -->
   <div class="search-wrap">
-    <div class="search-box">
+    <div class="search-box" :class="{ 'is-disabled': !mapReady }">
       <span>🔍</span>
-      <input v-model="searchInput" @input="onSearchInput" placeholder="搜索地点名称..." autocomplete="off" />
+      <input
+        v-model="searchInput"
+        :disabled="!mapReady"
+        :placeholder="mapLoading ? '地图加载中...' : mapReady ? '搜索地点名称...' : '地图不可用'"
+        autocomplete="off"
+        @input="onSearchInput"
+      />
     </div>
     <div class="search-results" :class="{ 'is-visible': searchVisible && searchResultsData.length }">
       <div
@@ -324,10 +363,22 @@ onUnmounted(() => {
   </div>
 
   <div id="map-container"></div>
-  <p v-if="mapError" class="map-error">⚠️ {{ mapError }}</p>
+  <div v-if="mapError" class="map-error" role="alert">
+    <span>⚠️ {{ mapError }}</span>
+    <button type="button" class="map-retry" :disabled="mapLoading" @click="retryMap">
+      {{ mapLoading ? '重新加载中...' : '重新加载' }}
+    </button>
+  </div>
 
   <!-- FAB -->
-  <button v-if="authStore.isAdmin" class="fab-add" @click="map && openForm('', map.getCenter().lat, map.getCenter().lng)">+</button>
+  <button
+    v-if="authStore.isAdmin"
+    type="button"
+    class="fab-add"
+    :disabled="!mapReady || mapLoading"
+    :aria-label="mapReady ? '添加恋爱足迹' : '地图不可用，暂时不能添加足迹'"
+    @click="map && openForm('', map.getCenter().lat, map.getCenter().lng)"
+  >+</button>
 
   <!-- Detail Card -->
   <div class="detail-backdrop" :class="{ 'is-visible': showDetail }" @click="showDetail = false"></div>
@@ -339,9 +390,13 @@ onUnmounted(() => {
         <img v-for="(url, i) in selectedMarker.photos" :key="i" :src="url" alt="" class="detail-photo" />
       </div>
       <div v-if="selectedMarker.photos.length > 1" class="carousel-nav">
-        <button class="carousel-btn" @click="carouselIndex = Math.max(0, carouselIndex - 1)" :disabled="carouselIndex === 0">‹</button>
+        <button class="carousel-btn" type="button" aria-label="上一张照片" @click="carouselIndex = Math.max(0, carouselIndex - 1)" :disabled="carouselIndex === 0">
+          <span class="carousel-glyph" aria-hidden="true">‹</span>
+        </button>
         <span class="carousel-counter">{{ carouselIndex + 1 }} / {{ selectedMarker.photos.length }}</span>
-        <button class="carousel-btn" @click="carouselIndex = Math.min(selectedMarker.photos.length - 1, carouselIndex + 1)" :disabled="carouselIndex === selectedMarker.photos.length - 1">›</button>
+        <button class="carousel-btn" type="button" aria-label="下一张照片" @click="carouselIndex = Math.min(selectedMarker.photos.length - 1, carouselIndex + 1)" :disabled="carouselIndex === selectedMarker.photos.length - 1">
+          <span class="carousel-glyph" aria-hidden="true">›</span>
+        </button>
       </div>
     </div>
     <!-- 兼容旧数据 -->
@@ -380,7 +435,9 @@ onUnmounted(() => {
         <div class="photo-thumbs">
           <div v-for="(photo, i) in form.photos" :key="`${photo.url}-${i}`" class="photo-thumb-item">
             <img :src="photo.url" alt="" />
-            <button class="photo-remove-btn" @click="removePhoto(i)" :disabled="uploading">✕</button>
+            <button class="photo-remove-btn" type="button" aria-label="移除这张待上传照片" @click="removePhoto(i)" :disabled="uploading">
+              <span class="photo-remove-glyph" aria-hidden="true">✕</span>
+            </button>
           </div>
           <label class="photo-add-btn">
             <span>＋</span>
@@ -399,41 +456,64 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.marker-count { margin-left: auto; font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
-
-#map-container { position: fixed; top: var(--topbar-height); left: 0; right: 0; bottom: var(--tabbar-height); }
-.map-error {
-  position: fixed; left: 50%; top: calc(var(--topbar-height) + 90px); z-index: 16;
-  transform: translateX(-50%); max-width: min(520px, calc(100vw - 32px));
-  padding: 10px 14px; border-radius: 12px; background: rgba(120, 30, 40, 0.9);
-  color: #fff; font-size: 13px; line-height: 1.5; text-align: center;
+.marker-count {
+  margin-left: auto; min-width: 0; font-size: 13px; color: var(--text-secondary);
+  white-space: nowrap; overflow-wrap: anywhere;
 }
 
-.search-wrap { position: fixed; top: calc(var(--topbar-height) + 12px); left: 16px; right: 16px; z-index: 15; }
+#map-container { position: fixed; top: var(--topbar-actual-height); left: 0; right: 0; bottom: var(--tabbar-height); }
+.map-error {
+  position: fixed; left: 50%; top: calc(var(--topbar-actual-height) + 90px); z-index: 16;
+  transform: translateX(-50%); width: max-content; max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 14px; border-radius: 12px; background: rgba(120, 30, 40, 0.9);
+  color: #fff; font-size: 13px; line-height: 1.5; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.map-error > span { min-width: 0; }
+.map-retry {
+  min-height: 44px; padding: 8px 18px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.14); color: #fff;
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+.map-retry:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.search-wrap { position: fixed; top: calc(var(--topbar-actual-height) + 12px); left: 16px; right: 16px; z-index: 15; }
 .search-box { display: flex; align-items: center; gap: 8px; background: var(--glass-bg); backdrop-filter: blur(20px); border: 1px solid var(--glass-border); border-radius: 14px; padding: 8px 16px; }
 .search-box input { flex: 1; border: none; background: transparent; outline: none; font-size: 15px; color: var(--text-primary); }
+.search-box.is-disabled { opacity: 0.6; }
+.search-box input:disabled { cursor: not-allowed; }
 .search-box input::placeholder { color: var(--text-secondary); }
 
 .search-results { margin-top: 6px; max-height: 260px; overflow-y: auto; background: rgba(30, 30, 50, 0.92); backdrop-filter: blur(20px); border-radius: 12px; border: 1px solid var(--glass-border); display: none; }
 .search-results.is-visible { display: block; }
 .search-result-item { padding: 12px 16px; cursor: pointer; font-size: 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); transition: background 0.15s; }
 .search-result-item:hover { background: rgba(255, 255, 255, 0.08); }
-.search-result-name { font-weight: 600; }
-.search-result-addr { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+.search-result-name { min-width: 0; font-weight: 600; overflow-wrap: anywhere; word-break: break-word; }
+.search-result-addr { min-width: 0; font-size: 12px; color: var(--text-secondary); margin-top: 2px; overflow-wrap: anywhere; word-break: break-word; }
 
 .fab-add { position: fixed; bottom: var(--fab-bottom); right: var(--fab-right); z-index: 15; width: 56px; height: 56px; border-radius: 50%; border: none; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: #fff; font-size: 28px; cursor: pointer; box-shadow: 0 6px 24px rgba(255, 107, 157, 0.4); transition: all 0.25s; display: flex; align-items: center; justify-content: center; }
 .fab-add:hover { transform: scale(1.1); }
+.fab-add:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
 
 /* Detail Card */
 .detail-backdrop { position: fixed; inset: 0; z-index: 25; background: rgba(0, 0, 0, 0.4); opacity: 0; pointer-events: none; transition: opacity 0.3s; }
 .detail-backdrop.is-visible { opacity: 1; pointer-events: auto; }
-.detail-card { position: fixed; bottom: 0; left: 0; right: 0; z-index: 30; background: rgba(30, 30, 50, 0.95); backdrop-filter: blur(30px); border-top: 1px solid var(--glass-border); border-radius: 24px 24px 0 0; padding: 20px 24px calc(36px + var(--safe-bottom)); transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1); max-height: 70dvh; overflow-y: auto; }
+.detail-card {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
+  min-width: 0; background: rgba(30, 30, 50, 0.95); backdrop-filter: blur(30px);
+  border-top: 1px solid var(--glass-border); border-radius: 24px 24px 0 0;
+  padding: 20px 24px calc(36px + var(--safe-bottom));
+  transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  max-height: 70dvh; overflow-y: auto; overflow-wrap: anywhere; word-break: break-word;
+}
 .detail-card.is-visible { transform: translateY(0); }
 .detail-handle { width: 40px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.2); margin: 0 auto 16px; }
 .detail-photo { width: 100%; max-height: 240px; object-fit: cover; border-radius: 16px; margin-bottom: 16px; }
-.detail-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
-.detail-date { font-size: 13px; color: var(--accent); margin-bottom: 10px; }
-.detail-note { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
+.detail-title { min-width: 0; font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+.detail-date { min-width: 0; font-size: 13px; color: var(--accent); margin-bottom: 10px; }
+.detail-note { min-width: 0; font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
 .detail-actions { display: flex; gap: 12px; flex-wrap: wrap; }
 .detail-actions button { flex: 1; padding: 12px; border-radius: 12px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
 .btn-edit { background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2) !important; }
@@ -442,16 +522,16 @@ onUnmounted(() => {
 .btn-delete:hover { background: rgba(220, 38, 38, 0.35); }
 
 /* Form */
-.form-group { margin-bottom: 14px; }
+.form-group { min-width: 0; margin-bottom: 14px; }
 .form-group label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
-.form-group input, .form-group textarea { width: 100%; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--glass-border); background: rgba(255, 255, 255, 0.06); color: #fff; font-size: 14px; outline: none; transition: border-color 0.2s; }
+.form-group input, .form-group textarea { width: 100%; min-height: 44px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--glass-border); background: rgba(255, 255, 255, 0.06); color: #fff; font-size: 14px; outline: none; transition: border-color 0.2s; }
 .form-group input:focus, .form-group textarea:focus { border-color: var(--primary); }
 .form-group textarea { resize: vertical; min-height: 60px; }
 .form-btns { display: flex; gap: 12px; margin-top: 20px; }
-.form-btns button { flex: 1; padding: 12px; border-radius: 12px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+.form-btns button { flex: 1; min-height: 44px; padding: 12px; border-radius: 12px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
 .btn-cancel { background: rgba(255, 255, 255, 0.1); color: #fff; }
 
-:deep(.love-marker) { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 24px; filter: drop-shadow(0 2px 6px rgba(255, 107, 157, 0.5)); cursor: pointer; transition: transform 0.2s; }
+:deep(.love-marker) { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 24px; filter: drop-shadow(0 2px 6px rgba(255, 107, 157, 0.5)); cursor: pointer; transition: transform 0.2s; touch-action: manipulation; }
 :deep(.love-marker:hover) { transform: scale(1.3); }
 
 @media (max-width: 720px) {
@@ -502,11 +582,16 @@ onUnmounted(() => {
 }
 .photo-thumb-item img { width: 100%; height: 100%; object-fit: cover; }
 .photo-remove-btn {
-  position: absolute; top: 2px; right: 2px; width: 20px; height: 20px;
-  border-radius: 50%; border: none; background: rgba(0,0,0,0.6); color: #fff;
-  font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  position: absolute; top: 0; right: 0; width: 44px; height: 44px;
+  padding: 2px; border-radius: 0; border: none; background: transparent; color: #fff;
+  cursor: pointer; display: flex; align-items: flex-start; justify-content: flex-end;
 }
-.photo-remove-btn:hover { background: #ef4444; }
+.photo-remove-glyph {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.7); font-size: 11px;
+  display: flex; align-items: center; justify-content: center;
+}
+.photo-remove-btn:hover .photo-remove-glyph { background: #ef4444; }
 .photo-add-btn {
   width: 72px; height: 72px; border-radius: 10px; border: 2px dashed rgba(255,255,255,0.2);
   display: flex; align-items: center; justify-content: center; cursor: pointer;
@@ -516,7 +601,7 @@ onUnmounted(() => {
 .photo-add-btn input { display: none; }
 
 /* 照片轮播 */
-.detail-carousel { position: relative; overflow: hidden; border-radius: 16px; margin-bottom: 16px; background: rgba(0,0,0,0.3); }
+.detail-carousel { position: relative; min-width: 0; overflow: hidden; border-radius: 16px; margin-bottom: 16px; background: rgba(0,0,0,0.3); }
 .carousel-track { display: flex; transition: transform 0.3s ease; }
 .carousel-track .detail-photo {
   min-width: 100%; height: 320px; object-fit: contain; flex-shrink: 0;
@@ -527,12 +612,17 @@ onUnmounted(() => {
   padding: 8px 0;
 }
 .carousel-btn {
-  width: 32px; height: 32px; border-radius: 50%; border: none;
-  background: rgba(255,255,255,0.1); color: #fff; font-size: 18px;
+  width: 44px; height: 44px; border-radius: 50%; border: none;
+  padding: 0; background: transparent; color: #fff; font-size: 18px;
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: background 0.2s;
 }
-.carousel-btn:hover:not(:disabled) { background: rgba(255,255,255,0.2); }
+.carousel-glyph {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+  display: flex; align-items: center; justify-content: center;
+}
+.carousel-btn:hover:not(:disabled) .carousel-glyph { background: rgba(255,255,255,0.2); }
 .carousel-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 .carousel-counter { font-size: 13px; color: var(--text-secondary); }
 </style>

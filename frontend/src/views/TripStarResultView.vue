@@ -122,7 +122,7 @@ onUnmounted(() => {
       </div>
       <p class="status-message">{{ message }}</p>
       <p v-if="polling && !isTerminal" class="polling-tip">正在自动刷新进度，任务完成或失败后会停止轮询。</p>
-      <p v-if="errorMsg" class="error-msg">{{ errorMsg }}</p>
+      <p v-if="errorMsg" class="error-msg" role="alert">{{ errorMsg }}</p>
       <button v-if="status === 'failed'" class="ghost-btn" @click="retry">重新规划</button>
     </section>
 
@@ -176,11 +176,15 @@ onUnmounted(() => {
 <style scoped>
 .tripstar-result-page {
   min-height: 100dvh;
+  min-width: 0;
   padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom);
   color: var(--text-primary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .glass {
+  min-width: 0;
   border: 1px solid var(--glass-border);
   border-radius: 28px;
   background: var(--glass-bg);
@@ -190,6 +194,7 @@ onUnmounted(() => {
 
 .status-card {
   max-width: 1080px;
+  min-width: 0;
   margin: 0 auto 20px;
   padding: 30px;
 }
@@ -199,6 +204,11 @@ onUnmounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
+  min-width: 0;
+}
+
+.status-header > div {
+  min-width: 0;
 }
 
 .eyebrow {
@@ -208,14 +218,19 @@ onUnmounted(() => {
   font-weight: 900;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 h1,
 h2 {
   margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .status-pill {
+  flex-shrink: 0;
   border-radius: 999px;
   padding: 8px 14px;
   background: rgba(255, 255, 255, 0.12);
@@ -247,6 +262,8 @@ h2 {
 .error-msg {
   margin: 8px 0 0;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .error-msg {
@@ -265,6 +282,7 @@ h2 {
 
 .result-grid {
   max-width: 1080px;
+  min-width: 0;
   margin: 0 auto;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -274,6 +292,7 @@ h2 {
 .overview-card,
 .budget-card,
 .day-card {
+  min-width: 0;
   padding: 26px;
 }
 
@@ -295,6 +314,9 @@ h2 {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-secondary);
   font-size: 13px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .budget-card ul {
@@ -307,8 +329,15 @@ h2 {
   display: flex;
   justify-content: space-between;
   gap: 16px;
+  min-width: 0;
   padding: 11px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.budget-card li span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .day-card {
@@ -320,6 +349,8 @@ h2 {
 .attraction p {
   color: var(--text-secondary);
   line-height: 1.75;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .day-index {
@@ -335,6 +366,7 @@ h2 {
 }
 
 .attraction {
+  min-width: 0;
   border-radius: 18px;
   padding: 16px;
   background: rgba(255, 255, 255, 0.06);

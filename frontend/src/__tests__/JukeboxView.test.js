@@ -68,5 +68,7 @@ describe('JukeboxView 权限 UI', () => {
 
     expect(wrapper.find('.rc-adopt-btn').exists()).toBe(true)
     expect(wrapper.find('.rc-remove-btn').exists()).toBe(true)
+    expect(wrapper.get('.rc-adopt-btn').attributes('aria-label')).toBe('采纳 歌')
+    expect(wrapper.get('.rc-remove-btn').attributes('aria-label')).toBe('移除 歌 的推荐')
   })
 })

@@ -54,7 +54,7 @@ describe('DayDetailView', () => {
     mockGet.mockResolvedValue({
       date: '2023-10-26',
       mood: { emoji: '🥰', note: '心动', level: 5 },
-      timeline: [{ id: 1, title: '第一次见面', content: '很开心', icon: '💕' }],
+      timeline: [{ id: 1, title: '第一次见面', content: '很开心', icon: '💕', photo_url: '/photos/story.jpg' }],
       places: [{ id: 3, title: '黄鹤楼', note: '一起看江', photos: ['https://img/p1.jpg'] }],
       photos: [{ id: 7, url: '/photos/meet.jpg', thumbnail_url: '/photos/meet.jpg', description: '那天' }],
       gallery_unlocked: true,
@@ -69,6 +69,9 @@ describe('DayDetailView', () => {
     expect(wrapper.text()).toContain('心动')
     expect(wrapper.text()).toContain('那天')
     expect(wrapper.text()).not.toContain('还是空白的')
+    expect(wrapper.find('.story-card img').attributes('width')).toBe('1600')
+    expect(wrapper.find('.story-card img').attributes('height')).toBe('900')
+    expect(wrapper.find('.nav-date').attributes('aria-label')).toBe('选择要查看的日期')
   })
 
   it('没有痕迹时给出空状态，画廊未解锁时不展示照片', async () => {

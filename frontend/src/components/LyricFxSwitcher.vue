@@ -1,37 +1,65 @@
 <script setup>
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { useLyricFxStore } from '../stores/lyricFx'
 
 const lyricFxStore = useLyricFxStore()
 const open = ref(false)
+const triggerRef = ref(null)
 
 function toggle() {
   open.value = !open.value
 }
 
-function select(effect) {
+async function select(effect) {
   lyricFxStore.apply(effect.key)
   open.value = false
+  await nextTick()
+  triggerRef.value?.focus()
 }
 
 // 点击外部关闭
 function onClickOutside() {
   open.value = false
 }
+
+async function closeAndFocus() {
+  open.value = false
+  await nextTick()
+  triggerRef.value?.focus()
+}
 </script>
 
 <template>
-  <div class="fx-wrap" v-click-outside="onClickOutside">
-    <button class="fx-btn" type="button" title="歌词漂浮效果" @click.stop="toggle">
+  <div class="fx-wrap" v-click-outside="onClickOutside" @keydown.esc.stop.prevent="closeAndFocus">
+    <button
+      ref="triggerRef"
+      class="fx-btn"
+      type="button"
+      title="歌词漂浮效果"
+      aria-label="歌词漂浮效果"
+      aria-haspopup="true"
+      aria-controls="lyric-fx-menu"
+      :aria-expanded="open"
+      @click.stop="toggle"
+    >
       {{ lyricFxStore.current.emoji }}
     </button>
-    <div class="fx-dropdown" :class="{ 'is-open': open }">
+    <div
+      id="lyric-fx-menu"
+      class="fx-dropdown"
+      :class="{ 'is-open': open }"
+      role="group"
+      aria-label="歌词漂浮效果"
+      :aria-hidden="!open"
+      :inert="open ? null : ''"
+    >
       <button
         v-for="effect in lyricFxStore.effects"
         :key="effect.key"
         type="button"
         class="fx-item"
         :class="{ 'is-active': lyricFxStore.currentKey === effect.key }"
+        :aria-pressed="lyricFxStore.currentKey === effect.key"
         @click="select(effect)"
       >
         <span class="fx-item-emoji">{{ effect.emoji }}</span>
@@ -138,5 +166,13 @@ function onClickOutside() {
 .fx-item-desc {
   font-size: 11px;
   opacity: 0.6;
+}
+
+@media (max-width: 720px) {
+  .fx-dropdown {
+    left: 0;
+    right: auto;
+    width: min(200px, calc(100vw - var(--safe-left) - var(--safe-right) - 24px));
+  }
 }
 </style>

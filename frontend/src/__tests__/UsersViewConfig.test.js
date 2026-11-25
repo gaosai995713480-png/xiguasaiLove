@@ -99,4 +99,36 @@ describe('UsersView 配置管理', () => {
     })
     expect(mockListKeys).toHaveBeenCalledTimes(2)
   })
+
+  it('移动端卡片保留配置脱敏值和用户操作字段', async () => {
+    mockListUsers.mockResolvedValueOnce([
+      {
+        id: 7,
+        username: 'visitor_with_a_very_long_username_ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+        role: 'visitor',
+        disabled: false,
+        created_at: '2026-01-02 03:04:05',
+        last_login_at: null,
+      },
+    ])
+
+    const { default: UsersView } = await import('../views/UsersView.vue')
+    const wrapper = mount(UsersView, {
+      global: {
+        stubs: {
+          TopBar: { template: '<div><slot /></div>' },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.get('.config-table td[data-label="状态"]').text()).toContain('已配置')
+    expect(wrapper.get('.config-table td[data-label="脱敏值"]').text()).toBe('abcd****1234')
+
+    const userRow = wrapper.get('.user-table-wrap .user-table tbody tr')
+    expect(userRow.get('td[data-label="状态"]').text()).toContain('正常')
+    expect(userRow.get('td[data-label="最后登录"]').text()).toContain('从未登录')
+    expect(userRow.get('td[data-label="操作"] button').text()).toBe('禁用')
+  })
 })

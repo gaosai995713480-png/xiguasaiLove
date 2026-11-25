@@ -150,7 +150,7 @@ onMounted(() => {
           <textarea v-model="form.special_requirements" rows="4" placeholder="例如：少走路、想看夜景、避开排队景点" />
         </label>
 
-        <p v-if="errorMsg" class="error-msg">{{ errorMsg }}</p>
+        <p v-if="errorMsg" class="error-msg" role="alert">{{ errorMsg }}</p>
         <button class="submit-btn" :disabled="submitting">
           {{ submitting ? '正在提交...' : '生成旅行计划' }}
         </button>
@@ -162,12 +162,14 @@ onMounted(() => {
 <style scoped>
 .tripstar-page {
   min-height: 100dvh;
+  min-width: 0;
   padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom);
   color: var(--text-primary);
 }
 
 .glass {
   max-width: 960px;
+  min-width: 0;
   margin: 0 auto 20px;
   border: 1px solid var(--glass-border);
   border-radius: 28px;
@@ -192,6 +194,8 @@ onMounted(() => {
   margin: 0;
   font-size: clamp(30px, 5vw, 56px);
   line-height: 1.05;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .hero-desc {
@@ -199,6 +203,8 @@ onMounted(() => {
   margin: 16px 0 0;
   color: var(--text-secondary);
   line-height: 1.8;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .planner {
@@ -206,18 +212,21 @@ onMounted(() => {
 }
 
 .plan-form {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 18px;
 }
 
 .form-row {
+  min-width: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 
 label {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -232,6 +241,8 @@ label span {
 input,
 select,
 textarea {
+  min-width: 0;
+  max-width: 100%;
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 16px;
@@ -248,6 +259,8 @@ textarea {
 .error-msg {
   margin: 0;
   color: #ff8a8a;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .submit-btn {

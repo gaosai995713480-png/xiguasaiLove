@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { reactive } from 'vue'
 
 const mockCompanies = vi.fn()
 const mockDetect = vi.fn()
@@ -8,6 +9,7 @@ const mockGetConfig = vi.fn()
 const mockUpdateConfig = vi.fn()
 const mockPush = vi.fn()
 const mockGetMapConfig = vi.fn()
+const authState = reactive({ isAdmin: false })
 
 vi.mock('../api/index.js', () => ({
   expressApi: {
@@ -23,9 +25,7 @@ vi.mock('../api/index.js', () => ({
 }))
 
 vi.mock('../stores/auth.js', () => ({
-  useAuthStore: () => ({
-    isAdmin: false,
-  }),
+  useAuthStore: () => authState,
 }))
 
 vi.mock('../stores/context', () => ({
@@ -55,6 +55,7 @@ describe('ExpressView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useRealTimers()
+    authState.isAdmin = false
     localStorage.clear()
     mockCompanies.mockResolvedValue({
       companies: [
@@ -103,6 +104,35 @@ describe('ExpressView', () => {
     await flushPromises()
 
     expect(mockQuery).toHaveBeenCalledWith('SF1234567890', 'shunfeng', '1234')
+  })
+
+  it('手机号使用数字键盘，管理员配置头是可访问的按钮', async () => {
+    authState.isAdmin = true
+
+    const { default: ExpressView } = await import('../views/ExpressView.vue')
+    const wrapper = mount(ExpressView, {
+      global: {
+        stubs: {
+          TopBar: { template: '<div><slot /></div>' },
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.find('#express-com-select').setValue('shunfeng')
+
+    const phoneInput = wrapper.get('#express-phone-input')
+    expect(phoneInput.attributes('type')).toBe('tel')
+    expect(phoneInput.attributes('inputmode')).toBe('numeric')
+
+    const toggle = wrapper.get('[data-test="express-config-toggle"]')
+    expect(toggle.element.tagName).toBe('BUTTON')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(toggle.attributes('aria-controls')).toBe('express-config-body')
+
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('#express-config-body').exists()).toBe(true)
   })
 
   it('单号缩短到 6 位以下时会立即结束识别中状态', async () => {

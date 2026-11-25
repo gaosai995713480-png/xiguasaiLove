@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 const mockGetMapConfig = vi.fn()
+let originalMatchMedia
 
 vi.mock('../api/index.js', () => ({
   tripstarApi: {
@@ -48,12 +49,15 @@ describe('TripStarMapPanel', () => {
   beforeEach(() => {
     vi.resetModules()
     vi.clearAllMocks()
+    originalMatchMedia = window.matchMedia
     delete window.AMap
     delete window._AMapSecurityConfig
     document.getElementById('tripstar-amap-js-sdk')?.remove()
   })
 
   afterEach(() => {
+    if (originalMatchMedia) window.matchMedia = originalMatchMedia
+    else delete window.matchMedia
     delete window.AMap
     delete window._AMapSecurityConfig
     document.getElementById('tripstar-amap-js-sdk')?.remove()
@@ -121,6 +125,47 @@ describe('TripStarMapPanel', () => {
 
     expect(wrapper.text()).toContain('VITE_TRIPSTAR_AMAP_WEB_JS_KEY 未配置或仍是占位值')
     expect(wrapper.text()).not.toContain('正在加载高德地图')
+  })
+
+  it('窄屏锁定地图拖拽，保留景点按钮定位并给出说明', async () => {
+    window.matchMedia = vi.fn().mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })
+    mockGetMapConfig.mockResolvedValueOnce({
+      provider: 'amap',
+      configured: true,
+      amap_web_js_key: 'web-js-key',
+      amap_security_js_code: 'security-code',
+    })
+
+    const MapCtor = vi.fn(function () {
+      this.add = vi.fn()
+      this.setFitView = vi.fn()
+      this.destroy = vi.fn()
+    })
+    window.AMap = {
+      Map: MapCtor,
+      Marker: vi.fn(function (options) {
+        this.options = options
+      }),
+      Polyline: vi.fn(function (options) {
+        this.options = options
+      }),
+    }
+
+    const { default: TripStarMapPanel } = await import('../components/tripstar/TripStarMapPanel.vue')
+    const wrapper = mount(TripStarMapPanel, { props: { plan } })
+
+    await flushPromises()
+
+    expect(MapCtor.mock.calls[0][1]).toMatchObject({
+      dragEnable: false,
+      touchZoom: false,
+    })
+    expect(wrapper.text()).toContain('手机端地图已锁定拖拽')
+    expect(wrapper.findAll('.point-chip')).toHaveLength(2)
   })
 
   it('SDK 脚本已加载但未初始化时显示加载失败，而不是误报需要配置', async () => {

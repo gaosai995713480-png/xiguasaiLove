@@ -95,11 +95,17 @@ describe('DanmuBar', () => {
 
     expect(wrapper.get('.danmu-bar').classes()).not.toContain('is-collapsed')
     expect(wrapper.find('[aria-label="展开发送框"]').exists()).toBe(false)
+    expect(wrapper.get('.danmu-settings').attributes('aria-hidden')).toBe('true')
+    expect(wrapper.get('.danmu-settings').attributes('inert')).toBeDefined()
+    expect(wrapper.get('.danmu-panel').attributes('inert')).toBeDefined()
 
     await wrapper.get('[aria-label="收起发送框"]').trigger('click')
     await nextTick()
 
     expect(wrapper.get('.danmu-bar').classes()).toContain('is-collapsed')
+    expect(wrapper.get('.danmu-bar').attributes('inert')).toBeDefined()
+    expect(wrapper.get('button[aria-label="弹幕设置"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('button[aria-label="弹幕列表"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[aria-label="展开发送框"]').exists()).toBe(true)
     expect(localStorage.getItem('danmu_bar_collapsed')).toBe('1')
 
@@ -107,6 +113,7 @@ describe('DanmuBar', () => {
     await nextTick()
 
     expect(wrapper.get('.danmu-bar').classes()).not.toContain('is-collapsed')
+    expect(wrapper.get('.danmu-bar').attributes('inert')).toBeUndefined()
     expect(wrapper.find('[aria-label="展开发送框"]').exists()).toBe(false)
     expect(localStorage.getItem('danmu_bar_collapsed')).toBe('0')
 

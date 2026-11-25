@@ -8,16 +8,42 @@ import { renderMarkdown as renderSafeMarkdown } from '../utils/markdown'
 const authStore = useAuthStore()
 const contextStore = useContextStore()
 const AI_ICON_URL = '/ai-icon.png'
+const AI_OPEN_EVENT = 'ai-chat:open'
 
 const isOpen = ref(false)
 const isLoading = ref(false)
 const inputText = ref('')
+const aiViewportHeight = ref(0)
 let abortController = null
 let activeTypewriterFrame = 0
 let activeTypewriterFinalize = null
 let componentUnmounted = false
 let sendRequestSeq = 0
+let visualViewport = null
+let focusBeforeOpen = null
 const listRef = ref(null)
+const panelRef = ref(null)
+const closeButtonRef = ref(null)
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  'a[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+const panelViewportStyle = computed(() => (
+  aiViewportHeight.value
+    ? { '--ai-viewport-height': `${aiViewportHeight.value}px` }
+    : {}
+))
+
+function syncVisualViewport() {
+  if (typeof window === 'undefined') return
+  const height = visualViewport?.height || window.innerHeight
+  if (height > 0) aiViewportHeight.value = Math.round(height)
+}
 
 // 当前选中的供应商
 const activeProvider = ref('codex') // 'codex' | 'claude'
@@ -437,6 +463,7 @@ async function openConversation(conv) {
 
 async function deleteConversation(conv) {
   if (isLoading.value) return
+  if (!window.confirm(`确定删除对话「${conv.title || '未命名'}」吗？`)) return
   const provider = activeProvider.value
   try {
     const res = await fetchWithAuth(`/api/ai/conversations/${conv.id}`, { method: 'DELETE' })
@@ -526,6 +553,12 @@ function formatTime(dateStr) {
 
 onMounted(() => {
   componentUnmounted = false
+  visualViewport = window.visualViewport || null
+  syncVisualViewport()
+  visualViewport?.addEventListener('resize', syncVisualViewport, { passive: true })
+  visualViewport?.addEventListener('scroll', syncVisualViewport, { passive: true })
+  window.addEventListener('resize', syncVisualViewport)
+  window.addEventListener(AI_OPEN_EVENT, openChat)
   checkStatus()
   initMessages('claude')
   initMessages('codex')
@@ -537,13 +570,67 @@ onMounted(() => {
 
 onUnmounted(() => {
   componentUnmounted = true
+  visualViewport?.removeEventListener('resize', syncVisualViewport)
+  visualViewport?.removeEventListener('scroll', syncVisualViewport)
+  window.removeEventListener('resize', syncVisualViewport)
+  window.removeEventListener(AI_OPEN_EVENT, openChat)
+  visualViewport = null
   abortController?.abort()
   cancelTypewriter()
 })
 
+function openChat() {
+  if (!isOpen.value) focusBeforeOpen = document.activeElement
+  isOpen.value = true
+  showHistory.value = false
+  showConfig.value = false
+  showSkillDropdown.value = false
+  syncVisualViewport()
+  scrollToBottom()
+  nextTick(() => closeButtonRef.value?.focus())
+}
+
+function closeChat() {
+  isOpen.value = false
+  nextTick(() => {
+    const returnToMenu = focusBeforeOpen?.closest?.('.panel-card')
+    if (focusBeforeOpen?.isConnected && !returnToMenu) {
+      focusBeforeOpen.focus()
+    } else {
+      document.querySelector('.nav-tabbar .tab-btn[data-tab="more"]')?.focus()
+    }
+    focusBeforeOpen = null
+  })
+}
+
+function handlePanelKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closeChat()
+    return
+  }
+  if (event.key !== 'Tab' || !panelRef.value) return
+
+  const focusable = [...panelRef.value.querySelectorAll(FOCUSABLE_SELECTOR)]
+    .filter(element => element.getClientRects().length > 0)
+  if (!focusable.length) return
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
 function toggleChat() {
-  isOpen.value = !isOpen.value
-  if (isOpen.value) scrollToBottom()
+  if (isOpen.value) {
+    closeChat()
+  } else {
+    openChat()
+  }
 }
 
 function initMessages(provider) {
@@ -874,7 +961,13 @@ async function handleBubbleClick(e) {
 <template>
   <Teleport to="body">
     <!-- 悬浮气泡 -->
-    <button class="ai-fab" :class="{ 'is-open': isOpen }" @click="toggleChat">
+    <button
+      class="ai-fab"
+      :class="{ 'is-open': isOpen }"
+      type="button"
+      aria-label="打开 AI 助手"
+      @click="toggleChat"
+    >
       <span class="ai-fab-icon">
         <template v-if="isOpen">✕</template>
         <img v-else :src="AI_ICON_URL" alt="AI" class="ai-icon-img" />
@@ -884,7 +977,17 @@ async function handleBubbleClick(e) {
 
     <!-- 聊天面板 -->
     <Transition name="chat-slide">
-      <div v-if="isOpen" class="ai-chat-panel">
+      <div
+        v-if="isOpen"
+        ref="panelRef"
+        class="ai-chat-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="AI 助手"
+        tabindex="-1"
+        :style="panelViewportStyle"
+        @keydown="handlePanelKeydown"
+      >
         <!-- 标题栏 -->
         <div class="chat-header">
           <span class="chat-header-icon">🤖</span>
@@ -925,10 +1028,37 @@ async function handleBubbleClick(e) {
             </button>
           </div>
 
-          <button class="chat-header-btn" title="对话历史" @click="openHistoryPanel">📋</button>
-          <button class="chat-header-btn" title="配置" @click="openConfig">⚙️</button>
-          <button class="chat-header-btn" title="清空对话" @click="clearChat">🗑️</button>
-          <button class="chat-header-close" @click="isOpen = false">✕</button>
+          <div class="chat-header-actions">
+            <button
+              class="chat-header-btn"
+              type="button"
+              title="对话历史"
+              aria-label="对话历史"
+              @click="openHistoryPanel"
+            >📋</button>
+            <button
+              class="chat-header-btn"
+              type="button"
+              title="配置"
+              aria-label="AI 设置"
+              @click="openConfig"
+            >⚙️</button>
+            <button
+              class="chat-header-btn"
+              type="button"
+              title="清空对话"
+              aria-label="清空对话"
+              @click="clearChat"
+            >🗑️</button>
+            <button
+              ref="closeButtonRef"
+              class="chat-header-close"
+              type="button"
+              title="关闭"
+              aria-label="关闭 AI 助手"
+              @click="closeChat"
+            >✕</button>
+          </div>
         </div>
 
         <!-- 技能选择器 -->
@@ -987,7 +1117,13 @@ async function handleBubbleClick(e) {
                 <div class="history-item-title">{{ conv.title }}</div>
                 <div class="history-item-time">{{ formatTime(conv.updated_at || conv.created_at) }}</div>
               </div>
-              <button class="history-item-delete" @click.stop="deleteConversation(conv)" title="删除">🗑️</button>
+              <button
+                class="history-item-delete"
+                type="button"
+                :aria-label="`删除对话：${conv.title || '未命名'}`"
+                title="删除"
+                @click.stop="deleteConversation(conv)"
+              >🗑️</button>
             </div>
           </div>
           <div v-if="historyLoading" class="history-loading">加载中...</div>
@@ -1231,6 +1367,12 @@ async function handleBubbleClick(e) {
   flex-shrink: 0;
 }
 .chat-header-icon { font-size: 20px; }
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
 
 /* ===== 供应商切换器 ===== */
 .provider-switcher {
@@ -1464,6 +1606,7 @@ async function handleBubbleClick(e) {
   -webkit-backdrop-filter: blur(40px);
   display: flex; flex-direction: column;
   border-radius: 20px; overflow: hidden;
+  padding-top: var(--safe-top);
 }
 .history-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -1493,7 +1636,7 @@ async function handleBubbleClick(e) {
   color: #a5b4fc;
 }
 .history-list {
-  flex: 1; overflow-y: auto; padding: 0 14px 14px;
+  flex: 1; overflow-y: auto; padding: 0 14px calc(14px + var(--safe-bottom));
   display: flex; flex-direction: column; gap: 4px;
 }
 .history-empty {
@@ -1517,7 +1660,9 @@ async function handleBubbleClick(e) {
 .history-item-time { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
 .history-item-delete {
   background: none; border: none; cursor: pointer; font-size: 14px;
-  opacity: 0; transition: opacity 0.15s; padding: 4px;
+  width: 44px; height: 44px; flex: 0 0 44px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.15s; border-radius: 50%;
 }
 .history-item:hover .history-item-delete { opacity: 0.5; }
 .history-item-delete:hover { opacity: 1 !important; }
@@ -1782,10 +1927,7 @@ async function handleBubbleClick(e) {
 /* ===== 移动端 ===== */
 @media (max-width: 720px) {
   .ai-fab {
-    width: 48px;
-    height: 48px;
-    font-size: 20px;
-    bottom: calc(var(--fab-bottom) + 64px);
+    display: none;
   }
 
   .ai-chat-panel {
@@ -1793,17 +1935,65 @@ async function handleBubbleClick(e) {
     right: 0;
     bottom: 0;
     width: 100%;
-    height: 100dvh;
+    height: var(--ai-viewport-height, 100dvh);
+    max-height: var(--ai-viewport-height, 100dvh);
     border-radius: 0 !important;
     z-index: 200;
   }
 
   .chat-header {
-    padding-top: calc(10px + var(--safe-top));
+    flex-wrap: wrap;
+    row-gap: 8px;
+    padding: calc(8px + var(--safe-top)) 12px 8px;
+  }
+
+  .chat-header-icon {
+    flex: 0 0 auto;
+  }
+
+  .provider-switcher {
+    flex: 1 1 calc(100% - 44px);
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .provider-switcher::-webkit-scrollbar {
+    display: none;
+  }
+
+  .provider-tab {
+    flex: 0 0 auto;
+    min-width: 64px;
+    min-height: var(--touch-min);
+    padding: 0 10px;
+  }
+
+  .chat-header-actions {
+    flex: 0 0 100%;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .chat-header-btn,
+  .chat-header-close {
+    width: var(--touch-min);
+    height: var(--touch-min);
+    flex: 0 0 var(--touch-min);
   }
 
   .chat-input-bar {
     padding-bottom: calc(12px + var(--safe-bottom));
+  }
+
+  .chat-history-panel {
+    border-radius: 0;
+  }
+}
+
+@media (hover: none) {
+  .history-item-delete {
+    opacity: 0.72;
   }
 }
 

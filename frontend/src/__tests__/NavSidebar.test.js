@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { nextTick, reactive } from 'vue'
 
 const mockPush = vi.fn()
-const route = { path: '/' }
+const route = reactive({ path: '/' })
 const authState = { isAdmin: false }
 
 vi.mock('vue-router', () => ({
@@ -81,6 +82,35 @@ describe('NavSidebar 手机底部导航', () => {
     const wrapper = await mountNav()
     await wrapper.get('[data-tab="more"]').trigger('click')
     expect(panelText(wrapper)).toContain('用户管理')
+    wrapper.unmount()
+  })
+
+  it('从更多面板打开 AI 助手事件并关闭面板', async () => {
+    const onOpenAi = vi.fn()
+    window.addEventListener('ai-chat:open', onOpenAi)
+    const wrapper = await mountNav()
+
+    await wrapper.get('[data-tab="more"]').trigger('click')
+    const item = wrapper.findAll('.panel-item').find((btn) => btn.text().includes('AI 助手'))
+    expect(item).toBeTruthy()
+    await item.trigger('click')
+
+    expect(onOpenAi).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.panel-card').exists()).toBe(false)
+
+    window.removeEventListener('ai-chat:open', onOpenAi)
+    wrapper.unmount()
+  })
+
+  it('路由变化后自动关闭底部面板', async () => {
+    const wrapper = await mountNav()
+    await wrapper.get('[data-tab="more"]').trigger('click')
+    expect(wrapper.find('.panel-card').exists()).toBe(true)
+
+    route.path = '/mood'
+    await nextTick()
+
+    expect(wrapper.find('.panel-card').exists()).toBe(false)
     wrapper.unmount()
   })
 

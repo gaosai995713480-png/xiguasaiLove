@@ -170,4 +170,30 @@ describe('TripStarResultView', () => {
     expect(wrapper.text()).toContain('继续规划中')
     expect(wrapper.text()).not.toContain('规划失败')
   })
+
+  it('失败任务的长错误串会完整进入错误提示区域', async () => {
+    const longError = `UPSTREAM_ERROR_${'X'.repeat(180)}`
+    mockGetStatus.mockResolvedValueOnce({
+      task_id: 'task-001',
+      status: 'failed',
+      progress: 100,
+      message: '规划失败',
+      error: longError,
+    })
+
+    const { default: TripStarResultView } = await import('../views/TripStarResultView.vue')
+    const wrapper = mount(TripStarResultView, {
+      global: {
+        stubs: {
+          TopBar: { template: '<div><slot /></div>' },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const error = wrapper.get('.error-msg')
+    expect(error.attributes('role')).toBe('alert')
+    expect(error.text()).toBe(longError)
+  })
 })

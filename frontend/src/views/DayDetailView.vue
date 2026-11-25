@@ -93,9 +93,9 @@ onUnmounted(() => {
       <h2>{{ title }}</h2>
       <p class="hero-hint">把当天已经留下的心情、故事、足迹和照片放在一起看。</p>
       <div class="day-nav">
-        <button class="nav-btn" :disabled="!valid" @click="go(-1)">‹ 前一天</button>
-        <input class="nav-date" type="date" :value="valid ? day : ''" @change="jump" />
-        <button class="nav-btn" :disabled="!valid" @click="go(1)">后一天 ›</button>
+        <button class="nav-btn" type="button" :disabled="!valid" @click="go(-1)">‹ 前一天</button>
+        <input class="nav-date" type="date" aria-label="选择要查看的日期" :value="valid ? day : ''" @change="jump" />
+        <button class="nav-btn" type="button" :disabled="!valid" @click="go(1)">后一天 ›</button>
       </div>
     </header>
 
@@ -106,7 +106,7 @@ onUnmounted(() => {
       <section class="section">
         <div class="section-head">
           <h3>心情</h3>
-          <button class="text-link" @click="router.push('/mood')">去心情日历</button>
+          <button class="text-link" type="button" @click="router.push('/mood')">去心情日历</button>
         </div>
         <div v-if="mood" class="mood-card">
           <span class="mood-emoji">{{ mood.emoji }}</span>
@@ -115,13 +115,13 @@ onUnmounted(() => {
             <p class="mood-note">{{ mood.note || '这天没有写下备注' }}</p>
           </div>
         </div>
-        <p v-else class="empty-line">这天还没有打卡。<button class="text-link" @click="router.push('/mood')">去记下心情</button></p>
+        <p v-else class="empty-line">这天还没有打卡。<button class="text-link" type="button" @click="router.push('/mood')">去记下心情</button></p>
       </section>
 
       <section class="section">
         <div class="section-head">
           <h3>故事</h3>
-          <button class="text-link" @click="router.push('/timeline')">去时间轴</button>
+          <button class="text-link" type="button" @click="router.push('/timeline')">去时间轴</button>
         </div>
         <div v-if="timeline.length" class="story-list">
           <article v-for="item in timeline" :key="item.id" class="story-card">
@@ -129,38 +129,46 @@ onUnmounted(() => {
             <div>
               <h4>{{ item.title }}</h4>
               <p v-if="item.content">{{ item.content }}</p>
-              <img v-if="item.photo_url" :src="item.photo_url" alt="" />
+              <img
+                v-if="item.photo_url"
+                :src="item.photo_url"
+                alt=""
+                width="1600"
+                height="900"
+                loading="lazy"
+                decoding="async"
+              />
             </div>
           </article>
         </div>
-        <p v-else class="empty-line">这天还没有写进时间轴。<button class="text-link" @click="router.push('/timeline')">去记录</button></p>
+        <p v-else class="empty-line">这天还没有写进时间轴。<button class="text-link" type="button" @click="router.push('/timeline')">去记录</button></p>
       </section>
 
       <section class="section">
         <div class="section-head">
           <h3>足迹</h3>
-          <button class="text-link" @click="router.push('/map')">去恋爱地图</button>
+          <button class="text-link" type="button" @click="router.push('/map')">去恋爱地图</button>
         </div>
         <div v-if="places.length" class="place-list">
           <article v-for="place in places" :key="place.id" class="place-card" @click="router.push('/map')">
-            <img v-if="placeCover(place)" :src="placeCover(place)" alt="" />
+            <img v-if="placeCover(place)" :src="placeCover(place)" alt="" width="88" height="88" loading="lazy" />
             <div>
               <h4>{{ place.title }}</h4>
               <p>{{ place.note || '没有备注' }}</p>
             </div>
           </article>
         </div>
-        <p v-else class="empty-line">这天还没有落到地图上。<button class="text-link" @click="router.push('/map')">去标记</button></p>
+        <p v-else class="empty-line">这天还没有落到地图上。<button class="text-link" type="button" @click="router.push('/map')">去标记</button></p>
       </section>
 
       <section class="section">
         <div class="section-head">
           <h3>照片</h3>
-          <button class="text-link" @click="router.push('/gallery')">去心动画廊</button>
+          <button class="text-link" type="button" @click="router.push('/gallery')">去心动画廊</button>
         </div>
         <p v-if="!galleryUnlocked" class="empty-line">
           画廊还没解锁，照片先藏着。
-          <button class="text-link" @click="router.push('/gallery')">去解锁</button>
+          <button class="text-link" type="button" @click="router.push('/gallery')">去解锁</button>
         </p>
         <div v-else-if="photos.length" class="photo-grid">
           <button
@@ -174,7 +182,7 @@ onUnmounted(() => {
             <span v-if="photo.description">{{ photo.description }}</span>
           </button>
         </div>
-        <p v-else class="empty-line">这天还没有进入相册的照片。<button class="text-link" @click="router.push('/gallery')">去相册</button></p>
+        <p v-else class="empty-line">这天还没有进入相册的照片。<button class="text-link" type="button" @click="router.push('/gallery')">去相册</button></p>
       </section>
 
       <p v-if="empty" class="empty-all">这一天还是空白的。可以从心情、时间轴、地图或相册留下第一条痕迹。</p>
@@ -199,6 +207,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .nav-btn,
@@ -208,9 +217,13 @@ onUnmounted(() => {
   color: #fff;
   border-radius: 10px;
   font-size: 13px;
+  min-height: 44px;
 }
 
 .nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 6px 10px;
   cursor: pointer;
 }
@@ -221,12 +234,15 @@ onUnmounted(() => {
 }
 
 .nav-date {
+  min-width: 0;
+  max-width: 100%;
   padding: 6px 8px;
   color-scheme: dark;
 }
 
 .page {
   max-width: 820px;
+  min-width: 0;
   margin: 0 auto;
   padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom);
 }
@@ -264,6 +280,7 @@ onUnmounted(() => {
 }
 
 .section {
+  min-width: 0;
   margin-bottom: 28px;
   padding: 20px;
   border-radius: 20px;
@@ -278,10 +295,14 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 16px;
+  min-width: 0;
 }
 
 .section-head h3 {
   font-size: 16px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .text-link {
@@ -290,7 +311,13 @@ onUnmounted(() => {
   color: var(--accent);
   cursor: pointer;
   font-size: 13px;
-  padding: 0;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.4;
 }
 
 .mood-card,
@@ -299,6 +326,15 @@ onUnmounted(() => {
   display: flex;
   gap: 14px;
   align-items: flex-start;
+  min-width: 0;
+}
+
+.mood-card > div,
+.story-card > div,
+.place-card > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .mood-emoji,
@@ -319,6 +355,8 @@ onUnmounted(() => {
 .place-card p,
 .empty-line {
   font-size: 14px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .story-list,
@@ -338,10 +376,14 @@ onUnmounted(() => {
 }
 
 .story-card img {
+  display: block;
   width: 100%;
   height: auto;
-  max-height: 180px;
+  aspect-ratio: 16 / 9;
+  max-height: none;
   margin-top: 10px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .place-card {
@@ -355,6 +397,7 @@ onUnmounted(() => {
 }
 
 .photo-item {
+  min-width: 0;
   border: none;
   padding: 0;
   background: transparent;
@@ -375,11 +418,14 @@ onUnmounted(() => {
   margin-top: 6px;
   font-size: 12px;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .empty-all {
   text-align: center;
   padding: 8px 8px 0;
+  overflow-wrap: anywhere;
 }
 
 .lightbox {
@@ -403,6 +449,9 @@ onUnmounted(() => {
 .lightbox p {
   margin-top: 12px;
   color: #fff;
+  max-width: 92vw;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .lightbox-close {

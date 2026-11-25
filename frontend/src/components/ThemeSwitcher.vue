@@ -1,40 +1,72 @@
 <script setup>
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { useThemeStore } from '../stores/theme'
 
 const themeStore = useThemeStore()
 const open = ref(false)
+const triggerRef = ref(null)
 
 function toggle() {
   open.value = !open.value
 }
 
-function select(theme) {
+async function select(theme) {
   themeStore.applyTheme(theme.name)
   open.value = false
+  await nextTick()
+  triggerRef.value?.focus()
 }
 
 // 点击外部关闭
 function onClickOutside() {
   open.value = false
 }
+
+async function closeAndFocus() {
+  open.value = false
+  await nextTick()
+  triggerRef.value?.focus()
+}
 </script>
 
 <template>
-  <div class="ts-wrap" v-click-outside="onClickOutside">
-    <button class="ts-btn" type="button" title="切换主题" @click.stop="toggle">🎨</button>
-    <div class="ts-dropdown" :class="{ 'is-open': open }">
-      <div
+  <div class="ts-wrap" v-click-outside="onClickOutside" @keydown.esc.stop.prevent="closeAndFocus">
+    <button
+      ref="triggerRef"
+      class="ts-btn"
+      type="button"
+      title="切换主题"
+      aria-label="切换主题"
+      aria-haspopup="true"
+      aria-controls="theme-switcher-menu"
+      :aria-expanded="open"
+      @click.stop="toggle"
+    >
+      🎨
+    </button>
+    <div
+      id="theme-switcher-menu"
+      class="ts-dropdown"
+      :class="{ 'is-open': open }"
+      role="group"
+      aria-label="主题选择"
+      :aria-hidden="!open"
+      :inert="open ? null : ''"
+    >
+      <button
         v-for="theme in themeStore.themes"
         :key="theme.name"
         class="ts-swatch"
         :class="{ 'is-active': themeStore.currentName === theme.name }"
         :style="{ background: theme.color }"
         :title="theme.name"
+        type="button"
+        :aria-label="`切换主题：${theme.name}`"
+        :aria-pressed="themeStore.currentName === theme.name"
         @click="select(theme)"
       >
         <span class="ts-emoji">{{ theme.emoji }}</span>
-      </div>
+      </button>
     </div>
   </div>
 </template>
@@ -92,16 +124,18 @@ function onClickOutside() {
 }
 
 .ts-swatch {
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border-radius: 10px;
   border: 2px solid transparent;
+  padding: 0;
   cursor: pointer;
   transition: all 0.2s;
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
+  appearance: none;
 }
 
 .ts-swatch:hover {

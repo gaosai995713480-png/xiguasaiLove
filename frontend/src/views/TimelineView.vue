@@ -46,7 +46,7 @@ onMounted(load)
 
 <template>
   <TopBar title="📖 恋爱时间轴" @back="router.push('/')">
-    <button v-if="authStore.isAdmin" class="btn-primary add-btn" @click="openAdd">+ 添加事件</button>
+    <button v-if="authStore.isAdmin" type="button" class="btn-primary add-btn" @click="openAdd">+ 添加事件</button>
   </TopBar>
 
   <div class="timeline-wrap" v-if="items.length">
@@ -64,8 +64,24 @@ onMounted(load)
       <div class="date">{{ item.event_date }}</div>
       <div class="title">{{ item.title }}</div>
       <div v-if="item.content" class="content">{{ item.content }}</div>
-      <img v-if="item.photo_url" class="photo" :src="item.photo_url" alt="" />
-      <button v-if="authStore.isAdmin" class="delete-btn" @click.stop="remove(item.id)">✕</button>
+      <img
+        v-if="item.photo_url"
+        class="photo"
+        :src="item.photo_url"
+        alt=""
+        width="1600"
+        height="900"
+        loading="lazy"
+        decoding="async"
+      />
+      <button
+        v-if="authStore.isAdmin"
+        type="button"
+        class="delete-btn"
+        aria-label="删除这条时间轴记录"
+        title="删除这条记录"
+        @click.stop="remove(item.id)"
+      >✕</button>
     </div>
   </div>
 
@@ -96,9 +112,14 @@ onMounted(load)
 </template>
 
 <style scoped>
-.add-btn { margin-left: auto; font-size: 14px; padding: 8px 18px; }
+.add-btn { margin-left: auto; font-size: 14px; padding: 8px 18px; min-height: 44px; }
 
-.timeline-wrap { max-width: 900px; margin: 0 auto; padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom); position: relative; }
+.timeline-wrap {
+  max-width: 900px; min-width: 0; margin: 0 auto;
+  padding: var(--page-pad-top) var(--page-pad-x) var(--page-pad-bottom);
+  position: relative;
+  overflow-wrap: anywhere; word-break: break-word;
+}
 
 .timeline-line {
   position: absolute; left: 50%; top: var(--page-pad-top); bottom: var(--page-pad-bottom); width: 3px;
@@ -111,6 +132,7 @@ onMounted(load)
   background: var(--glass-bg); backdrop-filter: blur(26px);
   border: 1px solid var(--glass-border); border-radius: 20px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  min-width: 0;
   opacity: 0; transform: translateX(-30px);
   animation: slide-in 0.5s ease forwards;
   cursor: pointer;
@@ -129,13 +151,17 @@ onMounted(load)
 .timeline-card:nth-child(odd) .dot { left: -36px; }
 
 .icon { font-size: 28px; margin-bottom: 8px; }
-.date { font-size: 12px; color: var(--accent); font-weight: 600; letter-spacing: 0.5px; margin-bottom: 6px; }
-.title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
-.content { font-size: 14px; line-height: 1.7; color: var(--text-secondary); }
-.photo { width: 100%; border-radius: 12px; margin-top: 12px; object-fit: cover; max-height: 200px; }
+.date { font-size: 12px; color: var(--accent); font-weight: 600; letter-spacing: 0.5px; margin-bottom: 6px; overflow-wrap: anywhere; }
+.title { font-size: 18px; font-weight: 700; margin-bottom: 8px; overflow-wrap: anywhere; word-break: break-word; }
+.content { font-size: 14px; line-height: 1.7; color: var(--text-secondary); overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; }
+.photo {
+  display: block; width: 100%; height: auto; aspect-ratio: 16 / 9;
+  border-radius: 12px; margin-top: 12px; object-fit: cover;
+  background: rgba(255, 255, 255, 0.06);
+}
 
 .delete-btn {
-  position: absolute; top: 12px; right: 12px; width: 28px; height: 28px;
+  position: absolute; top: 8px; right: 8px; width: 44px; height: 44px;
   border-radius: 50%; border: none; background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.5); font-size: 14px; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
@@ -145,13 +171,13 @@ onMounted(load)
 .timeline-card:hover .delete-btn { opacity: 1; }
 .delete-btn:hover { background: rgba(255, 80, 80, 0.3); color: #fff; }
 
-.empty-state { text-align: center; padding: 160px 24px 80px; font-size: 18px; color: var(--text-secondary); }
+.empty-state { text-align: center; padding: 160px 24px 80px; font-size: 18px; color: var(--text-secondary); overflow-wrap: anywhere; }
 
 /* Form */
-.form-group { margin-bottom: 14px; }
+.form-group { min-width: 0; margin-bottom: 14px; }
 .form-group label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
 .form-group input, .form-group textarea {
-  width: 100%; padding: 10px 14px; border-radius: 10px;
+  width: 100%; min-height: 44px; padding: 10px 14px; border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.06);
   color: #fff; font-size: 14px; outline: none; transition: border-color 0.2s;
 }
@@ -160,7 +186,7 @@ onMounted(load)
 }
 .form-group textarea { resize: vertical; min-height: 80px; }
 .form-actions { display: flex; gap: 10px; margin-top: 18px; }
-.form-actions button { flex: 1; padding: 10px; border-radius: 12px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+.form-actions button { flex: 1; min-height: 44px; padding: 10px; border-radius: 12px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
 .btn-cancel { background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); }
 
 @media (max-width: 720px) {

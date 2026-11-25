@@ -3,7 +3,7 @@
  * 弹幕栏组件 — 从 HomeView 拆出
  * 完全自治：管理弹幕数据、DOM 操作、定时器
  */
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { danmuApi } from '../api'
 import { useToast } from '../composables/useToast'
 
@@ -23,6 +23,22 @@ const BAR_COLLAPSE_KEY = 'danmu_bar_collapsed'
 let danmuMainTimer = null
 let resumeWarmupTimer = null
 let danmuIndex = 0
+let visualViewport = null
+
+const keyboardOffset = ref(0)
+const barStyle = computed(() => (
+  keyboardOffset.value > 0
+    ? { bottom: `${keyboardOffset.value + 8}px` }
+    : undefined
+))
+
+function syncKeyboardOffset() {
+  if (typeof window === 'undefined') return
+  const viewport = visualViewport
+  keyboardOffset.value = viewport
+    ? Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop))
+    : 0
+}
 
 function readBarCollapsed() {
   try { return localStorage.getItem(BAR_COLLAPSE_KEY) === '1' } catch { return false }
@@ -199,11 +215,20 @@ defineExpose({ cleanup })
 
 onMounted(async () => {
   await loadDanmu()
+  visualViewport = window.visualViewport || null
+  syncKeyboardOffset()
+  visualViewport?.addEventListener('resize', syncKeyboardOffset, { passive: true })
+  visualViewport?.addEventListener('scroll', syncKeyboardOffset, { passive: true })
+  window.addEventListener('resize', syncKeyboardOffset)
   document.addEventListener('visibilitychange', handleVisibilityChange)
   if (!document.hidden) startStream()
 })
 
 onUnmounted(() => {
+  visualViewport?.removeEventListener('resize', syncKeyboardOffset)
+  visualViewport?.removeEventListener('scroll', syncKeyboardOffset)
+  window.removeEventListener('resize', syncKeyboardOffset)
+  visualViewport = null
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   cleanup()
 })
@@ -213,10 +238,16 @@ onUnmounted(() => {
   <div id="danmu-layer" class="danmu-layer"></div>
 
   <!-- 弹幕列表面板 -->
-  <div class="danmu-panel" :class="{ 'is-open': danmuPanelOpen && !barCollapsed }">
+  <div
+    class="danmu-panel"
+    :class="{ 'is-open': danmuPanelOpen && !barCollapsed }"
+    aria-label="弹幕列表"
+    :aria-hidden="!danmuPanelOpen || barCollapsed"
+    :inert="(!danmuPanelOpen || barCollapsed) ? '' : null"
+  >
     <div class="danmu-panel-header">
       <h3>💬 弹幕列表</h3>
-      <button class="danmu-panel-close" @click="danmuPanelOpen = false">✕</button>
+      <button class="danmu-panel-close" type="button" aria-label="关闭弹幕列表" @click="danmuPanelOpen = false">✕</button>
     </div>
     <div class="danmu-panel-body">
       <div v-if="!danmuList.length" class="danmu-panel-empty">还没有弹幕哦~</div>
@@ -248,20 +279,41 @@ onUnmounted(() => {
   </button>
 
   <!-- 弹幕输入栏 -->
-  <div class="danmu-bar" :class="{ 'is-collapsed': barCollapsed }" :aria-hidden="barCollapsed">
+  <div
+    class="danmu-bar"
+    :class="{ 'is-collapsed': barCollapsed }"
+    :style="barStyle"
+    :aria-hidden="barCollapsed"
+    :inert="barCollapsed ? '' : null"
+  >
     <button
       type="button"
-      class="danmu-settings-toggle"
+      class="danmu-settings-toggle danmu-collapse-toggle"
       aria-label="收起发送框"
       title="收起发送框"
+      :disabled="barCollapsed"
       @click="toggleBarCollapsed"
     >
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M6 10l6 6 6-6" />
       </svg>
     </button>
-    <button class="danmu-settings-toggle" @click="settingsOpen = !settingsOpen" title="弹幕设置">⚙️</button>
-    <button class="danmu-settings-toggle" @click="danmuPanelOpen = !danmuPanelOpen" title="弹幕列表">📋</button>
+    <button
+      type="button"
+      class="danmu-settings-toggle danmu-settings-open"
+      aria-label="弹幕设置"
+      :disabled="barCollapsed"
+      @click="settingsOpen = !settingsOpen"
+      title="弹幕设置"
+    >⚙️</button>
+    <button
+      type="button"
+      class="danmu-settings-toggle danmu-list-open"
+      aria-label="弹幕列表"
+      :disabled="barCollapsed"
+      @click="danmuPanelOpen = !danmuPanelOpen"
+      title="弹幕列表"
+    >📋</button>
     <input
       v-model="danmuInput"
       :maxlength="MAX_LEN"
@@ -275,7 +327,13 @@ onUnmounted(() => {
   </div>
 
   <!-- 弹幕设置面板 -->
-  <div class="danmu-settings" :class="{ 'is-visible': settingsOpen && !barCollapsed }">
+  <div
+    class="danmu-settings"
+    :class="{ 'is-visible': settingsOpen && !barCollapsed }"
+    aria-label="弹幕设置"
+    :aria-hidden="!settingsOpen || barCollapsed"
+    :inert="(!settingsOpen || barCollapsed) ? '' : null"
+  >
     <h3>弹幕设置</h3>
     <div class="danmu-settings-row">
       <span>开关</span>
@@ -507,17 +565,36 @@ onUnmounted(() => {
     right: calc(76px + var(--safe-right));
     padding: 10px 12px;
     gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(3, var(--touch-min)) minmax(0, 1fr);
+    grid-template-areas:
+      "collapse settings list ."
+      "input input input send";
+    align-items: center;
   }
 
   .danmu-bar input {
+    grid-area: input;
+    width: 100%;
+    height: var(--touch-min);
+    min-height: var(--touch-min);
+    padding: 0 12px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.07);
     font-size: 16px;
   }
+
+  .danmu-collapse-toggle { grid-area: collapse; }
+  .danmu-settings-open { grid-area: settings; }
+  .danmu-list-open { grid-area: list; }
 
   .danmu-counter {
     display: none;
   }
 
   .danmu-send {
+    grid-area: send;
+    min-width: var(--touch-min);
     padding: 6px 14px;
     font-size: 13px;
     min-height: var(--touch-min);
@@ -535,12 +612,14 @@ onUnmounted(() => {
 
   .danmu-settings {
     left: calc(12px + var(--safe-left));
+    bottom: calc(var(--fab-bottom) + 128px);
     width: calc(100vw - 24px - var(--safe-left) - var(--safe-right));
   }
 
   .danmu-panel {
     left: calc(8px + var(--safe-left));
     right: calc(8px + var(--safe-right));
+    bottom: calc(var(--fab-bottom) + 128px);
     max-height: 45dvh;
     border-radius: 16px;
   }

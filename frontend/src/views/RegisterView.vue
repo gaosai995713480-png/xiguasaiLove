@@ -201,7 +201,15 @@ async function handleRegister() {
   text-align: center;
 }
 
-.register-link a { color: var(--primary); text-decoration: none; font-weight: 600; }
+.register-link a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch-min);
+  padding: 0 8px;
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+}
 .register-link a:hover { text-decoration: underline; }
 
 @media (max-width: 860px) {

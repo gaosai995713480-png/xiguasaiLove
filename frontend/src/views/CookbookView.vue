@@ -357,8 +357,11 @@ onMounted(async () => {
 <style scoped>
 .cookbook-page {
   min-height: 100dvh;
+  min-width: 0;
   padding: calc(28px + var(--safe-top)) 28px calc(28px + var(--safe-bottom));
   color: var(--text-primary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .hero,
@@ -377,6 +380,7 @@ onMounted(async () => {
 
 .hero {
   position: relative;
+  min-width: 0;
   max-width: 1180px;
   margin: 0 auto 18px;
   padding: 30px;
@@ -404,6 +408,7 @@ onMounted(async () => {
 }
 
 .subtitle {
+  min-width: 0;
   max-width: 720px;
   color: var(--text-secondary);
   font-size: 18px;
@@ -445,6 +450,7 @@ button {
 }
 
 .tabs {
+  min-width: 0;
   max-width: 1180px;
   margin: 0 auto 18px;
 }
@@ -456,6 +462,7 @@ button {
 
 .content-grid {
   max-width: 1180px;
+  min-width: 0;
   margin: 0 auto;
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr) 360px;
@@ -465,6 +472,7 @@ button {
 
 .filters-card,
 .detail-card {
+  min-width: 0;
   padding: 18px;
 }
 
@@ -482,6 +490,8 @@ label {
 input,
 select,
 textarea {
+  width: 100%;
+  min-height: 44px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 14px;
   padding: 11px 12px;
@@ -498,30 +508,47 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
 }
 
 .recipe-list {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
 .recipe-card {
+  min-width: 0;
   padding: 18px;
   display: flex;
   justify-content: space-between;
   gap: 18px;
 }
 
+.recipe-card > div,
+.detail-card > *,
+.menu-card > *,
+.menu-card-header > div,
+.menu-items li > span,
+.menu-items li > small {
+  min-width: 0;
+}
+
 .recipe-card h3,
 .detail-card h2,
 .menu-card h3 {
   margin: 0 0 8px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .recipe-card p {
   margin: 0 0 10px;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .badges span {
@@ -552,6 +579,7 @@ textarea {
 
 .menus-panel {
   max-width: 900px;
+  min-width: 0;
   margin: 0 auto;
   padding: 22px;
   display: grid;
@@ -561,6 +589,7 @@ textarea {
 
 .menu-form,
 .menu-card {
+  min-width: 0;
   padding: 18px;
 }
 
@@ -575,6 +604,7 @@ textarea {
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .menu-items {
@@ -589,6 +619,7 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 8px 10px;
   border-radius: 12px;
@@ -596,7 +627,10 @@ textarea {
 }
 
 .menu-items small {
+  flex: 1 1 140px;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 @media (max-width: 980px) {
@@ -625,16 +659,25 @@ textarea {
 
   .tabs,
   .hero-actions {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: 4px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    max-width: 100%;
+    overflow: visible;
   }
 
   .tabs button,
   .hero-actions button {
-    flex-shrink: 0;
+    width: 100%;
     min-height: var(--touch-min);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .hero-actions .primary-btn,
+  .tabs button:last-child {
+    grid-column: 1 / -1;
   }
 }
 </style>

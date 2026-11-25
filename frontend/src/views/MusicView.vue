@@ -70,10 +70,36 @@ async function removeSong(id) {
 
 function playSong(index) { musicStore.play(index) }
 
+const progressPercent = computed(() => {
+  if (!Number.isFinite(musicStore.duration) || musicStore.duration <= 0) return 0
+  return Math.min(100, Math.max(0, Math.round((musicStore.currentTime / musicStore.duration) * 100)))
+})
+
 function onProgressClick(e) {
   const rect = e.currentTarget.getBoundingClientRect()
   const pct = ((e.clientX - rect.left) / rect.width) * 100
   musicStore.seekTo(pct)
+}
+
+function seekByPercent(delta) {
+  if (!Number.isFinite(musicStore.duration) || musicStore.duration <= 0) return
+  musicStore.seekTo(Math.min(100, Math.max(0, progressPercent.value + delta)))
+}
+
+function onProgressKeydown(e) {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+    e.preventDefault()
+    seekByPercent(-5)
+  } else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+    e.preventDefault()
+    seekByPercent(5)
+  } else if (e.key === 'Home') {
+    e.preventDefault()
+    seekByPercent(-100)
+  } else if (e.key === 'End') {
+    e.preventDefault()
+    seekByPercent(100)
+  }
 }
 
 const isUserInteracting = ref(false)
@@ -228,9 +254,9 @@ onMounted(() => musicStore.loadSongs())
 
 <template>
   <TopBar title="🎵 音乐时光" @back="router.push('/')">
-    <button v-if="authStore.isAdmin" class="btn-icon setting-btn" @click="openCookieModal" title="Cookie 设置">⚙️</button>
-    <button v-if="authStore.isAdmin" class="btn-icon setting-btn" @click="openBgmModal" title="首页背景音乐">🏠</button>
-    <button class="btn-primary add-btn" @click="showAddModal = true">+ 添加歌曲</button>
+    <button v-if="authStore.isAdmin" class="btn-icon setting-btn" type="button" aria-label="Cookie 设置" @click="openCookieModal" title="Cookie 设置">⚙️</button>
+    <button v-if="authStore.isAdmin" class="btn-icon setting-btn" type="button" aria-label="首页背景音乐" @click="openBgmModal" title="首页背景音乐">🏠</button>
+    <button class="btn-primary add-btn" type="button" @click="showAddModal = true">+ 添加歌曲</button>
   </TopBar>
 
   <div class="music-container">
@@ -258,8 +284,21 @@ onMounted(() => musicStore.loadSongs())
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
         </button>
       </div>
-      <div class="progress-wrap" @click="onProgressClick">
-        <div class="progress-bar" :style="{ width: (musicStore.duration ? (musicStore.currentTime / musicStore.duration * 100) : 0) + '%' }"></div>
+      <div
+        class="progress-control"
+        role="slider"
+        tabindex="0"
+        aria-label="播放进度"
+        :aria-valuemin="0"
+        :aria-valuemax="100"
+        :aria-valuenow="progressPercent"
+        :aria-valuetext="`${musicStore.fmtTime(musicStore.currentTime)} / ${musicStore.fmtTime(musicStore.duration)}`"
+        @click="onProgressClick"
+        @keydown="onProgressKeydown"
+      >
+        <div class="progress-wrap">
+          <div class="progress-bar" :style="{ width: (musicStore.duration ? (musicStore.currentTime / musicStore.duration * 100) : 0) + '%' }"></div>
+        </div>
       </div>
       <div class="time-row">
         <span>{{ musicStore.fmtTime(musicStore.currentTime) }}</span>
@@ -294,7 +333,13 @@ onMounted(() => musicStore.loadSongs())
           <div class="song-name">{{ song.title }}</div>
           <div class="song-detail">{{ song.artist }}</div>
         </div>
-        <button class="song-del" @click.stop="removeSong(song.id)">✕</button>
+        <button
+          class="song-del"
+          type="button"
+          :aria-label="`删除歌曲 ${song.title}`"
+          title="删除歌曲"
+          @click.stop="removeSong(song.id)"
+        >✕</button>
       </div>
     </div>
   </div>
@@ -317,7 +362,13 @@ onMounted(() => musicStore.loadSongs())
           <div class="sr-title">{{ r.name }}</div>
           <div class="sr-artist">{{ r.artist?.join?.(' / ') || r.artist }}</div>
         </div>
-        <button class="sr-add-btn" @click="addSong(r)" title="添加到歌单">+</button>
+        <button
+          class="sr-add-btn"
+          type="button"
+          :aria-label="`添加歌曲 ${r.name}`"
+          title="添加到歌单"
+          @click="addSong(r)"
+        >+</button>
       </div>
     </div>
     <!-- Or by ID -->
@@ -358,7 +409,14 @@ onMounted(() => musicStore.loadSongs())
           <div class="sr-title">{{ bgmCurrent.title || '未命名' }}</div>
           <div class="sr-artist">{{ bgmCurrent.artist }}（{{ bgmCurrent.source === 'local' ? '本地音频' : '在线音乐' }}）</div>
         </div>
-        <button class="song-del" @click="clearBgm" :disabled="bgmSaving" title="关闭背景音乐">✕</button>
+        <button
+          class="song-del"
+          type="button"
+          aria-label="关闭首页背景音乐"
+          :disabled="bgmSaving"
+          title="关闭背景音乐"
+          @click="clearBgm"
+        >✕</button>
       </template>
       <span v-else class="sr-artist">当前未设置背景音乐</span>
     </div>
@@ -370,7 +428,14 @@ onMounted(() => musicStore.loadSongs())
           <div class="sr-title">{{ song.title }}</div>
           <div class="sr-artist">{{ song.artist }}</div>
         </div>
-        <button class="sr-add-btn" @click="setBgmFromSong(song)" :disabled="bgmSaving" title="设为首页背景音乐">✓</button>
+        <button
+          class="sr-add-btn"
+          type="button"
+          :aria-label="`将 ${song.title} 设为首页背景音乐`"
+          :disabled="bgmSaving"
+          title="设为首页背景音乐"
+          @click="setBgmFromSong(song)"
+        >✓</button>
       </div>
     </div>
     <p v-else class="cookie-help">歌单还是空的，先去添加歌曲，或直接上传本地音频</p>
@@ -438,7 +503,26 @@ onMounted(() => musicStore.loadSongs())
 .play-btn:hover { transform: scale(1.12); box-shadow: 0 8px 32px rgba(255, 107, 157, 0.7); }
 .play-btn:active { transform: scale(0.96); }
 
-.progress-wrap { width: 100%; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); cursor: pointer; margin: 8px 0; }
+.progress-control {
+  width: 100%;
+  height: var(--touch-min);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: manipulation;
+  outline: none;
+}
+.progress-control:focus-visible {
+  box-shadow: 0 0 0 3px rgba(255, 107, 157, 0.4);
+}
+.progress-wrap {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  pointer-events: none;
+}
 .progress-bar { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.1s; }
 .time-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); }
 .play-error { margin-top: 10px; padding: 8px 12px; border-radius: 10px; background: rgba(255, 80, 80, 0.15); color: #ff6b6b; font-size: 13px; text-align: center; }
@@ -484,7 +568,7 @@ onMounted(() => musicStore.loadSongs())
 .song-meta { flex: 1; }
 .song-name { font-size: 15px; font-weight: 600; }
 .song-detail { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
-.song-del { width: 28px; height: 28px; border-radius: 50%; border: none; background: transparent; color: rgba(255, 255, 255, 0.3); font-size: 14px; cursor: pointer; opacity: 0; transition: all 0.2s; display: flex; align-items: center; justify-content: center; }
+.song-del { width: var(--touch-min); height: var(--touch-min); border-radius: 50%; border: none; background: transparent; color: rgba(255, 255, 255, 0.3); font-size: 14px; cursor: pointer; opacity: 0; transition: all 0.2s; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .song-item:hover .song-del { opacity: 1; }
 @media (hover: none) { .song-del { opacity: 0.6; } }
 .song-del:hover { background: rgba(255, 80, 80, 0.25); color: #fff; }
@@ -502,7 +586,7 @@ onMounted(() => musicStore.loadSongs())
 .sr-title { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sr-artist { font-size: 12px; color: var(--text-secondary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sr-add-btn {
-  width: 32px; height: 32px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2);
+  width: var(--touch-min); height: var(--touch-min); border-radius: 50%; border: 1px solid rgba(255,255,255,0.2);
   background: rgba(255,255,255,0.08); color: #fff; font-size: 18px;
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: all 0.2s; flex-shrink: 0;
@@ -514,7 +598,18 @@ onMounted(() => musicStore.loadSongs())
 .divider::after { right: 0; }
 
 /* Setting button */
-.setting-btn { margin-left: auto; background: transparent; border: none; font-size: 20px; cursor: pointer; padding: 4px; transition: transform 0.2s; }
+.setting-btn {
+  margin-left: auto;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  padding: 0;
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
 .setting-btn:hover { transform: rotate(45deg); }
 
 /* Cookie Modal */
