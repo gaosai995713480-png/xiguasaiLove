@@ -417,6 +417,55 @@ def test_fresh_database_initial_credentials_are_generated(monkeypatch, tmp_path)
     assert invite_insert[1] != database._LEGACY_DEFAULT_INVITE_CODE
 
 
+class ExistingCredentialCursor:
+    def __init__(self):
+        self.executed = []
+        self._fetchone = None
+
+    def execute(self, sql, params=None):
+        normalized = " ".join(str(sql).split())
+        self.executed.append((normalized, params))
+        if normalized.startswith(f"SELECT password FROM `{settings.page_password_table}`"):
+            self._fetchone = (database._LEGACY_DEFAULT_GALLERY_PASSWORD,)
+        elif normalized.startswith(f"SELECT COUNT(*) FROM `{settings.users_table}`"):
+            self._fetchone = (1,)
+        elif normalized.startswith(f"SELECT id, password FROM `{settings.users_table}`"):
+            self._fetchone = (1, database._LEGACY_DEFAULT_ADMIN_PASSWORD)
+        elif normalized.startswith(
+            "SELECT config_value FROM love_config WHERE config_key = 'INVITE_CODE'"
+        ):
+            self._fetchone = (database._LEGACY_DEFAULT_INVITE_CODE,)
+        elif normalized.startswith("SELECT COUNT(*) FROM love_config"):
+            self._fetchone = (1,)
+        else:
+            self._fetchone = None
+
+    def fetchone(self):
+        return self._fetchone
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+def test_existing_legacy_credentials_are_never_rewritten_on_startup(monkeypatch, tmp_path):
+    cursor = ExistingCredentialCursor()
+    monkeypatch.setattr(database, "ensure_database", lambda: None)
+    monkeypatch.setattr(database, "_get_connection", lambda: InitConnection(cursor))
+    monkeypatch.setattr(database, "_has_column", lambda conn, table, column: True)
+    monkeypatch.setattr(database, "_migrate_env_cookies", lambda conn: None)
+    monkeypatch.setattr(database, "_TABLE_INIT_DONE", False)
+    monkeypatch.setattr(database, "_SESSION_TABLE_READY", False)
+    monkeypatch.setattr(settings, "base_dir", tmp_path)
+
+    database.init_tables()
+
+    assert not any(sql.startswith("UPDATE") for sql, _ in cursor.executed)
+    assert not (tmp_path / "tmp" / "initial_credentials.txt").exists()
+
+
 class LikeCursor:
     def __init__(self):
         self.seen = set()

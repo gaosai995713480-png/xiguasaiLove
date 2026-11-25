@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 _TABLE_INIT_DONE = False
 _SESSION_TABLE_READY = False
 
-# 仅用于识别历史上已经写入数据库的固定初始值，并在启动时安全轮换。
+# 仅用于识别历史上写入数据库的固定初始值，并提示管理员手动更换。
 _LEGACY_DEFAULT_ADMIN_PASSWORD = "201220"
 _LEGACY_DEFAULT_GALLERY_PASSWORD = "201220"
 _LEGACY_DEFAULT_INVITE_CODE = "love2023"
@@ -25,7 +25,7 @@ def _write_initial_credentials(credentials: dict[str, str]) -> Path:
     target = settings.base_dir / "tmp" / "initial_credentials.txt"
     target.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# 首次初始化或安全轮换自动生成的凭据",
+        "# 首次初始化自动生成的凭据",
         "# 请登录后修改，并删除此文件",
     ]
     lines.extend(f"{key}={value}" for key, value in credentials.items())
@@ -488,7 +488,7 @@ def init_tables():
                 )
 
         # 首次初始化凭据：优先使用环境变量；未配置时生成随机值并写入受限文件。
-        # 已存在的记录不会被覆盖；仅对历史固定默认值做一次安全轮换。
+        # 已存在的记录绝不在启动时改写，避免覆盖用户主动设置的密码或邀请码。
         initial_admin_username = (settings.initial_admin_username or "admin").strip()
         admin_password_from_env = settings.initial_admin_password.strip()
         gallery_password_from_env = settings.initial_gallery_password.strip()
@@ -514,7 +514,7 @@ def init_tables():
                     "INITIAL_GALLERY_PASSWORD",
                     lambda: secrets.token_urlsafe(18),
                 )
-                if not gallery_row or gallery_row[0] == _LEGACY_DEFAULT_GALLERY_PASSWORD
+                if not gallery_row
                 else ""
             )
             if not gallery_row:
@@ -523,11 +523,9 @@ def init_tables():
                     ("gallery", initial_gallery_password),
                 )
             elif gallery_row[0] == _LEGACY_DEFAULT_GALLERY_PASSWORD:
-                cursor.execute(
-                    f"UPDATE `{settings.page_password_table}` SET password = %s WHERE page_key = 'gallery'",
-                    (initial_gallery_password,),
+                logger.warning(
+                    "检测到历史固定画廊密码；为避免覆盖用户配置，未自动修改，请登录后立即手动更换"
                 )
-                logger.warning("已轮换历史固定画廊密码，请查看环境变量或 tmp/initial_credentials.txt")
 
         # 确保默认 admin 用户
         with conn.cursor() as cursor:
@@ -554,16 +552,9 @@ def init_tables():
                 )
                 admin_row = cursor.fetchone()
                 if admin_row and admin_row[1] == _LEGACY_DEFAULT_ADMIN_PASSWORD:
-                    initial_admin_password = _ensure_secret(
-                        admin_password_from_env,
-                        "INITIAL_ADMIN_PASSWORD",
-                        lambda: secrets.token_urlsafe(18),
+                    logger.warning(
+                        "检测到历史固定管理员密码；为避免覆盖用户配置，未自动修改，请登录后立即手动更换"
                     )
-                    cursor.execute(
-                        f"UPDATE `{settings.users_table}` SET password = %s WHERE id = %s",
-                        (initial_admin_password, admin_row[0]),
-                    )
-                    logger.warning("已轮换历史固定管理员密码，请查看环境变量或 tmp/initial_credentials.txt")
 
         # 确保默认邀请码及 OSS 配置项
         default_configs = [
@@ -595,23 +586,20 @@ def init_tables():
                 "SELECT config_value FROM love_config WHERE config_key = 'INVITE_CODE'"
             )
             invite_row = cursor.fetchone()
-            if not invite_row or invite_row[0] == _LEGACY_DEFAULT_INVITE_CODE:
+            if not invite_row:
                 initial_invite_code = _ensure_secret(
                     invite_code_from_env,
                     "INITIAL_INVITE_CODE",
                     lambda: secrets.token_urlsafe(12),
                 )
-                if invite_row:
-                    cursor.execute(
-                        "UPDATE love_config SET config_value = %s WHERE config_key = 'INVITE_CODE'",
-                        (initial_invite_code,),
-                    )
-                    logger.warning("已轮换历史固定邀请码，请查看环境变量或 tmp/initial_credentials.txt")
-                else:
-                    cursor.execute(
-                        "INSERT INTO love_config (config_key, config_value) VALUES (%s, %s)",
-                        ("INVITE_CODE", initial_invite_code),
-                    )
+                cursor.execute(
+                    "INSERT INTO love_config (config_key, config_value) VALUES (%s, %s)",
+                    ("INVITE_CODE", initial_invite_code),
+                )
+            elif invite_row[0] == _LEGACY_DEFAULT_INVITE_CODE:
+                logger.warning(
+                    "检测到历史固定邀请码；为避免覆盖用户配置，未自动修改，请登录后立即手动更换"
+                )
 
             for k, v in default_configs:
                 cursor.execute("SELECT COUNT(*) FROM love_config WHERE config_key = %s", (k,))

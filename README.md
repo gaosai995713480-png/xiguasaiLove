@@ -57,8 +57,8 @@ uvicorn backend.main:app --reload
 
 首次创建数据库时，如果没有配置 `INITIAL_ADMIN_PASSWORD`、
 `INITIAL_GALLERY_PASSWORD` 和 `INITIAL_INVITE_CODE`，服务会生成随机初始值
-并写入 `tmp/initial_credentials.txt`（不会写入日志）。已有数据库中的正常值不会被覆盖；
-如果检测到历史固定默认值，会自动轮换到随机值并写入该文件。
+并写入 `tmp/initial_credentials.txt`（不会写入日志）。这些变量和启动初始化
+只会在数据库缺记录时生效，已有密码和邀请码不会在重新部署时被自动覆盖。
 
 ### 前端
 
