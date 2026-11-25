@@ -16,6 +16,11 @@ const routes = [
     meta: { guest: true },
   },
   {
+    path: '/account',
+    name: 'Account',
+    component: () => import('../views/AccountView.vue'),
+  },
+  {
     path: '/',
     name: 'Home',
     component: () => import('../views/HomeView.vue'),
@@ -148,6 +153,7 @@ router.afterEach((to) => {
     Cookbook: "我们的小厨房",
     TripStar: "旅行星辰",
     TripStarResult: "旅行星辰结果",
+    Account: "账号与安全",
     Users: "用户管理"
   }
   contextStore.pageName = pageMap[to.name] || (to.name || '')

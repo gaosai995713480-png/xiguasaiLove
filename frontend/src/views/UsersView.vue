@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import TopBar from '../components/TopBar.vue'
+import GlassModal from '../components/GlassModal.vue'
 import { backupApi, configApi, usersApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 
@@ -26,6 +27,13 @@ const backupJob = ref({ status: 'idle' })
 const backupBusy = ref(false)
 const backupHint = ref('')
 const backupDownloadHref = '/api/backup/export/download'
+const resetDialogOpen = ref(false)
+const resetTarget = ref(null)
+const resetPassword = ref('')
+const resetPasswordConfirm = ref('')
+const resetLoading = ref(false)
+const resetError = ref('')
+const resetNotice = ref('')
 let backupPollTimer = 0
 let backupPollRequestInFlight = false
 let backupViewActive = false
@@ -56,6 +64,57 @@ async function toggleUser(userId) {
   if (!confirm('确定要切换该用户的状态吗？')) return
   await usersApi.toggle(userId)
   await loadUsers()
+}
+
+function openResetPassword(user) {
+  if (!user || isCurrentUser(user)) return
+  resetTarget.value = user
+  resetPassword.value = ''
+  resetPasswordConfirm.value = ''
+  resetError.value = ''
+  resetNotice.value = ''
+  resetDialogOpen.value = true
+}
+
+function isCurrentUser(user) {
+  return String(user?.username || '').toLocaleLowerCase() === String(authStore.username || '').toLocaleLowerCase()
+}
+
+function closeResetPassword() {
+  if (resetLoading.value) return
+  resetDialogOpen.value = false
+  resetError.value = ''
+}
+
+async function submitResetPassword() {
+  if (resetLoading.value || !resetTarget.value) return
+  resetError.value = ''
+
+  const newPassword = resetPassword.value
+  if (newPassword.length < 8 || newPassword.length > 128) {
+    resetError.value = '新密码长度需为 8-128 个字符'
+    return
+  }
+  if (newPassword !== resetPasswordConfirm.value) {
+    resetError.value = '两次输入的新密码不一致'
+    return
+  }
+
+  resetLoading.value = true
+  try {
+    const result = await usersApi.resetUserPassword(resetTarget.value.id, newPassword)
+    if (result?.ok === false) {
+      throw new Error(result.error || '重置密码失败')
+    }
+    resetNotice.value = `已重置「${resetTarget.value.username}」的密码，该用户需要重新登录。`
+    resetDialogOpen.value = false
+    resetPassword.value = ''
+    resetPasswordConfirm.value = ''
+  } catch (error) {
+    resetError.value = error?.message || '重置密码失败，请稍后重试'
+  } finally {
+    resetLoading.value = false
+  }
 }
 
 async function saveInviteCode() {
@@ -332,6 +391,7 @@ onUnmounted(() => {
     <!-- 用户列表 -->
     <section class="glass-card">
       <h3>👥 用户列表（{{ users.length }}）</h3>
+      <p v-if="resetNotice" class="reset-notice" role="status">{{ resetNotice }}</p>
       <div class="user-table-wrap">
         <table class="user-table">
           <thead>
@@ -374,18 +434,28 @@ onUnmounted(() => {
                 </span>
               </td>
               <td data-label="操作">
-                <span class="cell-value">
+                <span v-if="isCurrentUser(u)" class="cell-value admin-hint">当前账号</span>
+                <div v-else class="cell-value user-actions">
                   <button
                     v-if="u.role !== 'admin'"
                     class="btn-small"
                     type="button"
+                    :data-test="`toggle-user-${u.id}`"
                     :class="u.disabled ? 'btn-enable' : 'btn-disable'"
                     @click="toggleUser(u.id)"
                   >
                     {{ u.disabled ? '启用' : '禁用' }}
                   </button>
-                  <span v-else class="admin-hint">—</span>
-                </span>
+                  <button
+                    class="btn-small btn-reset"
+                    type="button"
+                    :data-test="`reset-password-${u.id}`"
+                    :aria-label="`重置 ${u.username} 的密码`"
+                    @click="openResetPassword(u)"
+                  >
+                    重置密码
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -393,6 +463,49 @@ onUnmounted(() => {
       </div>
     </section>
   </main>
+
+  <GlassModal
+    v-model="resetDialogOpen"
+    :title="`重置 ${resetTarget?.username || '用户'} 的密码`"
+  >
+    <form class="reset-password-form" @submit.prevent="submitResetPassword">
+      <p class="reset-password-hint">
+        重置后，该用户的所有登录会话都会被撤销，需要使用新密码重新登录。
+      </p>
+      <label>
+        <span>新密码</span>
+        <input
+          v-model="resetPassword"
+          type="password"
+          autocomplete="new-password"
+          maxlength="128"
+          :disabled="resetLoading"
+          data-test="reset-password-input"
+        />
+      </label>
+      <label>
+        <span>确认新密码</span>
+        <input
+          v-model="resetPasswordConfirm"
+          type="password"
+          autocomplete="new-password"
+          maxlength="128"
+          :disabled="resetLoading"
+          data-test="reset-password-confirm"
+        />
+      </label>
+      <p class="password-hint">新密码长度为 8-128 个字符。</p>
+      <p v-if="resetError" class="config-error reset-error" role="alert">{{ resetError }}</p>
+      <div class="reset-actions">
+        <button type="button" class="btn-small" :disabled="resetLoading" @click="closeResetPassword">
+          取消
+        </button>
+        <button type="submit" class="btn-small btn-primary" :disabled="resetLoading">
+          {{ resetLoading ? '正在重置...' : '确认重置' }}
+        </button>
+      </div>
+    </form>
+  </GlassModal>
 </template>
 
 <style scoped>
@@ -559,6 +672,17 @@ a.backup-btn {
   color: rgba(255, 255, 255, 0.45);
 }
 
+.reset-notice {
+  margin: -8px 0 18px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: #bbf7d0;
+  background: rgba(22, 101, 52, 0.22);
+  border: 1px solid rgba(74, 222, 128, 0.24);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .invite-row {
   display: flex;
   align-items: center;
@@ -680,6 +804,67 @@ a.backup-btn {
 .btn-disable:hover { background: rgba(248, 113, 113, 0.2); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(248, 113, 113, 0.2); }
 .btn-enable { background: rgba(52, 211, 153, 0.1); color: #6ee7b7; border: 1px solid rgba(52, 211, 153, 0.2); }
 .btn-enable:hover { background: rgba(52, 211, 153, 0.2); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(52, 211, 153, 0.2); }
+.btn-reset { background: rgba(167, 139, 250, 0.14); color: #ddd6fe; border: 1px solid rgba(167, 139, 250, 0.25); }
+.btn-reset:hover { background: rgba(167, 139, 250, 0.24); transform: translateY(-2px); }
+
+.user-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.user-actions .btn-small {
+  min-height: var(--touch-min);
+}
+
+.reset-password-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.reset-password-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reset-password-form input {
+  width: 100%;
+  min-height: var(--touch-min);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  padding: 0 14px;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.07);
+  outline: none;
+}
+
+.reset-password-form input:focus {
+  border-color: var(--accent);
+}
+
+.reset-password-hint,
+.password-hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.reset-error {
+  grid-column: auto;
+}
+
+.reset-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
 
 @media (max-width: 600px) {
   .glass-card { padding: 20px; }

@@ -71,9 +71,26 @@ describe('NavSidebar 手机底部导航', () => {
     expect(text).toContain('表白信')
     expect(text).toContain('点歌台')
     expect(text).toContain('我们的小厨房')
+    expect(text).toContain('账号与安全')
     expect(text).not.toContain('心情日历')
     expect(text).not.toContain('音乐时光')
     expect(text).not.toContain('用户管理')
+    wrapper.unmount()
+  })
+
+  it('所有用户可从手机或桌面更多面板进入账号与安全', async () => {
+    const wrapper = await mountNav()
+
+    await wrapper.get('[data-tab="more"]').trigger('click')
+    const mobileItem = wrapper.findAll('.panel-item')
+      .find((btn) => btn.text().includes('账号与安全'))
+    expect(mobileItem).toBeTruthy()
+    await mobileItem.trigger('click')
+    expect(mockPush).toHaveBeenCalledWith('/account')
+
+    await wrapper.get('[data-desktop-tab="more"]').trigger('click')
+    expect(panelText(wrapper)).toContain('账号与安全')
+
     wrapper.unmount()
   })
 

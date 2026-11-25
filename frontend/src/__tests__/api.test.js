@@ -9,7 +9,7 @@ const mockFetch = vi.fn()
 vi.stubGlobal('fetch', mockFetch)
 
 // 动态导入以确保 mock 生效
-let danmuApi, authApi, dayApi, backupApi, fetchWithAuth
+let danmuApi, authApi, dayApi, backupApi, usersApi, galleryApi, fetchWithAuth
 
 beforeEach(async () => {
   vi.resetModules()
@@ -19,6 +19,8 @@ beforeEach(async () => {
   authApi = api.authApi
   dayApi = api.dayApi
   backupApi = api.backupApi
+  usersApi = api.usersApi
+  galleryApi = api.galleryApi
   fetchWithAuth = api.fetchWithAuth
 })
 
@@ -202,6 +204,72 @@ describe('backupApi', () => {
     expect(mockFetch.mock.calls[0][0]).toBe('/api/backup/export/download')
     expect(result.filename).toBe('xiguasai-memory-2026-09-18.zip')
     expect(result.blob).toBeInstanceOf(Blob)
+  })
+})
+
+describe('password APIs', () => {
+  it('修改当前用户密码', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ ok: true, reauthenticate: true }),
+    })
+
+    const result = await usersApi.changeOwnPassword('old-password', 'new-password')
+
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/users/password')
+    expect(mockFetch.mock.calls[0][1].method).toBe('POST')
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({
+      old_password: 'old-password',
+      new_password: 'new-password',
+    })
+    expect(result.reauthenticate).toBe(true)
+  })
+
+  it('管理员重置指定用户密码', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ ok: true }),
+    })
+
+    await usersApi.resetUserPassword(9, 'new-password')
+
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/users/9/reset-password')
+    expect(mockFetch.mock.calls[0][1].method).toBe('POST')
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({
+      new_password: 'new-password',
+    })
+  })
+
+  it('管理员修改画廊密码', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ ok: true }),
+    })
+
+    await galleryApi.changePassword('old-gallery', 'new-gallery')
+
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/gallery/password')
+    expect(mockFetch.mock.calls[0][1].method).toBe('POST')
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({
+      old_password: 'old-gallery',
+      new_password: 'new-gallery',
+    })
+  })
+
+  it('密码接口透传后端 error 文本', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      clone: () => ({
+        json: () => Promise.resolve({ error: '旧密码错误' }),
+      }),
+    })
+
+    await expect(usersApi.changeOwnPassword('wrong', 'new-password'))
+      .rejects.toMatchObject({ message: '旧密码错误', status: 400 })
   })
 })
 

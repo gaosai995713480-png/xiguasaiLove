@@ -258,6 +258,27 @@ def revoke_user_sessions(username: str) -> None:
         logger.warning("撤销用户会话失败: %s", username, exc_info=True)
 
 
+def revoke_gallery_access() -> None:
+    """清除所有会话的画廊解锁状态，但保留登录会话。"""
+    with _sessions_lock:
+        for user in _sessions.values():
+            user.gallery_unlocked = False
+    try:
+        ensure_session_table()
+        with get_db() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"""
+                    UPDATE `{settings.sessions_table}`
+                    SET gallery_unlocked = 0
+                    """
+                )
+            conn.commit()
+    except Exception:
+        logger.warning("撤销会话画廊访问状态失败", exc_info=True)
+        raise
+
+
 def set_gallery_unlocked(request: Request, unlocked: bool = True) -> None:
     """更新当前会话的画廊解锁状态，并持久化。"""
     token = get_session_token(request)

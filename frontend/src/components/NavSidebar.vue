@@ -63,6 +63,7 @@ const moreItems = computed(() => {
     ...groups.find((g) => g.key === 'romance').items.filter((item) => item.to !== '/mood'),
     ...groups.find((g) => g.key === 'music').items.filter((item) => item.to !== '/music'),
     ...groups.find((g) => g.key === 'tools').items,
+    { to: '/account', icon: '🛡️', label: '账号与安全', desc: '修改登录密码与管理画廊密码' },
   ]
   if (authStore.isAdmin) {
     items.push({ to: '/users', icon: '👥', label: '用户管理', desc: '账号、邀请码与回忆备份' })
@@ -159,6 +160,17 @@ function closePanel() {
     >
       <span class="btn-icon">{{ g.icon }}</span>
       <span class="btn-label">{{ g.label }}</span>
+    </button>
+    <button
+      class="sidebar-btn"
+      :class="{ 'is-active': activePanel === 'more' }"
+      type="button"
+      title="更多"
+      data-desktop-tab="more"
+      @click.stop="togglePanel('more')"
+    >
+      <span class="btn-icon">✨</span>
+      <span class="btn-label">更多</span>
     </button>
   </aside>
 

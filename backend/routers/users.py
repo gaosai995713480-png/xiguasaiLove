@@ -3,6 +3,8 @@ import hmac
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel
+
 from ..config import settings
 from ..database import get_db, get_config, set_config
 from ..dependencies import (
@@ -15,6 +17,10 @@ from ..dependencies import (
 from ..security import get_client_ip, password_limiter
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+class ResetPasswordRequest(BaseModel):
+    new_password: str
 
 
 @router.get("")
@@ -68,6 +74,58 @@ def toggle_user(user_id: int, _=Depends(require_role("admin"))):
         conn.commit()
     if disabled:
         revoke_user_sessions(username)
+    return {"ok": True}
+
+
+@router.post("/{user_id}/reset-password")
+def reset_user_password(
+    user_id: int,
+    body: ResetPasswordRequest,
+    request: Request,
+    _=Depends(require_role("admin")),
+):
+    """管理员重置其他用户密码，并撤销目标用户的全部会话。"""
+    current_user = get_current_user(request)
+    if not current_user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    raw_new_password = body.new_password
+    new_password = raw_new_password.strip()
+    if raw_new_password != new_password:
+        return JSONResponse(
+            {"error": "新密码首尾不能包含空格"},
+            status_code=400,
+        )
+    if len(new_password) < 8 or len(new_password) > 128:
+        return JSONResponse(
+            {"error": "新密码长度需为 8-128 个字符"},
+            status_code=400,
+        )
+
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"SELECT username FROM `{settings.users_table}` WHERE id = %s LIMIT 1",
+                (user_id,),
+            )
+            target = cursor.fetchone()
+            if not target:
+                return JSONResponse({"error": "user not found"}, status_code=404)
+
+            target_username = str(target[0])
+            if target_username.casefold() == current_user.username.casefold():
+                return JSONResponse(
+                    {"error": "不能重置当前登录账号，请使用本人改密接口"},
+                    status_code=400,
+                )
+
+            cursor.execute(
+                f"UPDATE `{settings.users_table}` SET password = %s WHERE id = %s",
+                (new_password, user_id),
+            )
+        conn.commit()
+
+    revoke_user_sessions(target_username)
     return {"ok": True}
 
 

@@ -150,6 +150,13 @@ export const authApi = {
 export const usersApi = {
   list: () => get('/api/users'),
   toggle: (id) => post(`/api/users/${id}/toggle`, {}),
+  changeOwnPassword: (oldPassword, newPassword) => post('/api/users/password', {
+    old_password: oldPassword,
+    new_password: newPassword,
+  }),
+  resetUserPassword: (id, newPassword) => post(`/api/users/${id}/reset-password`, {
+    new_password: newPassword,
+  }),
   getInviteCode: () => get('/api/users/invite-code'),
   updateInviteCode: (code) => post('/api/users/invite-code', { code }),
 }
@@ -236,6 +243,10 @@ export const photoApi = {
 
 export const galleryApi = {
   verify: (password) => post('/api/gallery/verify', { password }),
+  changePassword: (oldPassword, newPassword) => post('/api/gallery/password', {
+    old_password: oldPassword,
+    new_password: newPassword,
+  }),
 }
 
 export const weatherApi = {

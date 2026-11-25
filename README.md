@@ -79,6 +79,18 @@ python -m pytest tests/
 > 测试当前会读取 `.env` 中的数据库配置。运行前请确认使用独立测试库，
 > 不要直接对生产库执行完整测试。
 
+### 忘记密码
+
+无法登录时，可以在服务器上交互式重置用户或画廊密码：
+
+```powershell
+python tools/reset_password.py --user admin
+python tools/reset_password.py --gallery
+```
+
+脚本不会接受命令行密码参数，也不会把密码写入日志；用户密码重置后会撤销该用户的全部登录会话，
+画廊密码重置后会重新锁定所有会话的画廊访问。
+
 ## 🚢 部署
 
 推送到 `master` 分支后，GitHub Actions 流水线（`.github/workflows/deploy.yml`）会自动通过 SSH 部署到服务器。
