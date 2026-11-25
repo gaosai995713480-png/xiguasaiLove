@@ -8,7 +8,11 @@ import { renderMarkdown as renderSafeMarkdown } from '../utils/markdown'
 const authStore = useAuthStore()
 const contextStore = useContextStore()
 const AI_ICON_URL = '/ai-icon.png'
-const AI_OPEN_EVENT = 'ai-chat:open'
+
+const props = defineProps({
+  embedded: { type: Boolean, default: false },
+})
+const emit = defineEmits(['back'])
 
 const isOpen = ref(false)
 const isLoading = ref(false)
@@ -38,6 +42,7 @@ const panelViewportStyle = computed(() => (
     ? { '--ai-viewport-height': `${aiViewportHeight.value}px` }
     : {}
 ))
+const panelVisible = computed(() => props.embedded || isOpen.value)
 
 function syncVisualViewport() {
   if (typeof window === 'undefined') return
@@ -558,7 +563,6 @@ onMounted(() => {
   visualViewport?.addEventListener('resize', syncVisualViewport, { passive: true })
   visualViewport?.addEventListener('scroll', syncVisualViewport, { passive: true })
   window.addEventListener('resize', syncVisualViewport)
-  window.addEventListener(AI_OPEN_EVENT, openChat)
   checkStatus()
   initMessages('claude')
   initMessages('codex')
@@ -566,6 +570,7 @@ onMounted(() => {
   initMessages('grok')
   loadSkills()
   loadActiveSkills()
+  if (props.embedded) nextTick(() => scrollToBottom())
 })
 
 onUnmounted(() => {
@@ -573,7 +578,6 @@ onUnmounted(() => {
   visualViewport?.removeEventListener('resize', syncVisualViewport)
   visualViewport?.removeEventListener('scroll', syncVisualViewport)
   window.removeEventListener('resize', syncVisualViewport)
-  window.removeEventListener(AI_OPEN_EVENT, openChat)
   visualViewport = null
   abortController?.abort()
   cancelTypewriter()
@@ -591,6 +595,10 @@ function openChat() {
 }
 
 function closeChat() {
+  if (props.embedded) {
+    emit('back')
+    return
+  }
   isOpen.value = false
   nextTick(() => {
     const returnToMenu = focusBeforeOpen?.closest?.('.panel-card')
@@ -959,9 +967,10 @@ async function handleBubbleClick(e) {
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport to="body" :disabled="embedded">
     <!-- 悬浮气泡 -->
     <button
+      v-if="!embedded"
       class="ai-fab"
       :class="{ 'is-open': isOpen }"
       type="button"
@@ -976,13 +985,14 @@ async function handleBubbleClick(e) {
     </button>
 
     <!-- 聊天面板 -->
-    <Transition name="chat-slide">
+    <Transition :name="embedded ? 'chat-embedded' : 'chat-slide'">
       <div
-        v-if="isOpen"
+        v-if="panelVisible"
         ref="panelRef"
         class="ai-chat-panel"
-        role="dialog"
-        aria-modal="true"
+        :class="{ 'is-embedded': embedded }"
+        :role="embedded ? 'region' : 'dialog'"
+        :aria-modal="embedded ? undefined : 'true'"
         aria-label="AI 助手"
         tabindex="-1"
         :style="panelViewportStyle"
@@ -1051,6 +1061,15 @@ async function handleBubbleClick(e) {
               @click="clearChat"
             >🗑️</button>
             <button
+              v-if="embedded"
+              class="chat-header-back"
+              type="button"
+              title="返回"
+              aria-label="返回上一页"
+              @click="closeChat"
+            >← 返回</button>
+            <button
+              v-else
               ref="closeButtonRef"
               class="chat-header-close"
               type="button"
@@ -1358,6 +1377,27 @@ async function handleBubbleClick(e) {
   overflow: hidden;
 }
 
+.ai-chat-panel.is-embedded {
+  position: relative;
+  inset: auto;
+  right: auto;
+  bottom: auto;
+  width: 100%;
+  height: clamp(
+    320px,
+    calc(var(--ai-viewport-height, 100dvh) - var(--topbar-actual-height) - var(--tabbar-height) - 32px),
+    760px
+  );
+  max-height: 760px;
+  margin: 0 auto;
+  z-index: auto;
+  border-radius: 24px !important;
+}
+
+.ai-chat-panel.is-embedded .chat-history-panel {
+  padding-top: 0;
+}
+
 /* ===== 标题栏 ===== */
 .chat-header {
   display: flex; align-items: center; gap: 6px;
@@ -1372,6 +1412,21 @@ async function handleBubbleClick(e) {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+}
+.chat-header-back {
+  min-width: 76px;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chat-header-back:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 /* ===== 供应商切换器 ===== */
@@ -1947,6 +2002,10 @@ async function handleBubbleClick(e) {
     padding: calc(8px + var(--safe-top)) 12px 8px;
   }
 
+  .ai-chat-panel.is-embedded .chat-header {
+    padding-top: 8px;
+  }
+
   .chat-header-icon {
     flex: 0 0 auto;
   }
@@ -1980,6 +2039,11 @@ async function handleBubbleClick(e) {
     width: var(--touch-min);
     height: var(--touch-min);
     flex: 0 0 var(--touch-min);
+  }
+
+  .chat-header-back {
+    height: var(--touch-min);
+    min-width: 76px;
   }
 
   .chat-input-bar {

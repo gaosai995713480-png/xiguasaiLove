@@ -21,6 +21,11 @@ const routes = [
     component: () => import('../views/AccountView.vue'),
   },
   {
+    path: '/assistant',
+    name: 'Assistant',
+    component: () => import('../views/AssistantView.vue'),
+  },
+  {
     path: '/',
     name: 'Home',
     component: () => import('../views/HomeView.vue'),
@@ -154,6 +159,7 @@ router.afterEach((to) => {
     TripStar: "旅行星辰",
     TripStarResult: "旅行星辰结果",
     Account: "账号与安全",
+    Assistant: "AI 助手",
     Users: "用户管理"
   }
   contextStore.pageName = pageMap[to.name] || (to.name || '')

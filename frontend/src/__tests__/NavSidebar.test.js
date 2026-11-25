@@ -102,20 +102,24 @@ describe('NavSidebar 手机底部导航', () => {
     wrapper.unmount()
   })
 
-  it('从更多面板打开 AI 助手事件并关闭面板', async () => {
-    const onOpenAi = vi.fn()
-    window.addEventListener('ai-chat:open', onOpenAi)
+  it('手机和桌面更多面板都通过 /assistant 路由进入 AI 页面', async () => {
     const wrapper = await mountNav()
 
     await wrapper.get('[data-tab="more"]').trigger('click')
-    const item = wrapper.findAll('.panel-item').find((btn) => btn.text().includes('AI 助手'))
-    expect(item).toBeTruthy()
-    await item.trigger('click')
-
-    expect(onOpenAi).toHaveBeenCalledTimes(1)
+    const mobileItem = wrapper.findAll('.panel-item').find((btn) => btn.text().includes('AI 助手'))
+    expect(mobileItem).toBeTruthy()
+    await mobileItem.trigger('click')
+    expect(mockPush).toHaveBeenCalledWith('/assistant')
     expect(wrapper.find('.panel-card').exists()).toBe(false)
 
-    window.removeEventListener('ai-chat:open', onOpenAi)
+    await wrapper.get('[data-desktop-tab="more"]').trigger('click')
+    const desktopItem = wrapper.findAll('.panel-item').find((btn) => btn.text().includes('AI 助手'))
+    expect(desktopItem).toBeTruthy()
+    await desktopItem.trigger('click')
+    expect(mockPush).toHaveBeenCalledTimes(2)
+    expect(mockPush).toHaveBeenLastCalledWith('/assistant')
+    expect(wrapper.find('.panel-card').exists()).toBe(false)
+
     wrapper.unmount()
   })
 

@@ -252,7 +252,7 @@ describe('AiChatWidget', () => {
     wrapper.unmount()
   })
 
-  it('响应全局打开事件，声明 dialog 语义并同步 visualViewport 高度', async () => {
+  it('悬浮模式点击按钮后声明 dialog 语义并同步 visualViewport 高度', async () => {
     mockFetchWithAuth.mockImplementation(async (url) => {
       if (url === '/api/ai/status') return jsonResponse(providerStatus)
       if (url === '/api/ai/skills') return jsonResponse([])
@@ -266,7 +266,7 @@ describe('AiChatWidget', () => {
 
     const wrapper = await mountWidget()
     await flushPromises()
-    window.dispatchEvent(new CustomEvent('ai-chat:open'))
+    await wrapper.find('.ai-fab').trigger('click')
     await nextTick()
 
     const panel = wrapper.get('.ai-chat-panel')
@@ -280,6 +280,35 @@ describe('AiChatWidget', () => {
     await panel.trigger('keydown', { key: 'Escape' })
     await nextTick()
     expect(wrapper.find('.ai-chat-panel').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('embedded 模式不渲染 FAB 和关闭按钮，返回只触发事件且面板保持渲染', async () => {
+    mockFetchWithAuth.mockImplementation(async (url) => {
+      if (url === '/api/ai/status') return jsonResponse(providerStatus)
+      if (url === '/api/ai/skills') return jsonResponse([])
+      return jsonResponse({})
+    })
+
+    const { default: AiChatWidget } = await import('../components/AiChatWidget.vue')
+    const wrapper = mount(AiChatWidget, {
+      props: { embedded: true },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.ai-fab').exists()).toBe(false)
+    const panel = wrapper.get('.ai-chat-panel')
+    expect(panel.classes()).toContain('is-embedded')
+    expect(panel.attributes('role')).toBe('region')
+    expect(panel.attributes('aria-modal')).toBeUndefined()
+    expect(wrapper.find('.chat-header-close').exists()).toBe(false)
+    expect(wrapper.get('.chat-header-back').text()).toContain('返回')
+
+    await wrapper.get('.chat-header-back').trigger('click')
+    expect(wrapper.emitted('back')).toHaveLength(1)
+    expect(wrapper.find('.ai-chat-panel').exists()).toBe(true)
 
     wrapper.unmount()
   })

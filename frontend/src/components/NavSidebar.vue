@@ -59,7 +59,7 @@ const tabs = [
 
 const moreItems = computed(() => {
   const items = [
-    { key: 'ai', action: 'ai', icon: '🤖', label: 'AI 助手', desc: '向 AI 提问，整理回忆' },
+    { to: '/assistant', icon: '🤖', label: 'AI 助手', desc: '进入独立对话页面' },
     ...groups.find((g) => g.key === 'romance').items.filter((item) => item.to !== '/mood'),
     ...groups.find((g) => g.key === 'music').items.filter((item) => item.to !== '/music'),
     ...groups.find((g) => g.key === 'tools').items,
@@ -128,16 +128,7 @@ function navigateTo(to) {
   router.push(to)
 }
 
-function openAssistant() {
-  activePanel.value = null
-  window.dispatchEvent(new CustomEvent('ai-chat:open'))
-}
-
 function handlePanelItem(item) {
-  if (item.action === 'ai') {
-    openAssistant()
-    return
-  }
   navigateTo(item.to)
 }
 
