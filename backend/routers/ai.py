@@ -339,14 +339,12 @@ async def list_models(body: ModelsRequest, _=Depends(require_role("admin"))):
 
 @router.get("/config/agent")
 def agent_config(_=Depends(require_role("admin"))):
-    show_process = get_config("AGENT_SHOW_TOOL_PROCESS")
     max_rounds = get_config("AGENT_MAX_TOOL_ROUNDS")
     try:
         rounds = int(max_rounds) if max_rounds else 5
     except (TypeError, ValueError):
         rounds = 5
     return {
-        "show_tool_process": show_process != "false",
         "max_tool_rounds": rounds,
     }
 
@@ -354,12 +352,6 @@ def agent_config(_=Depends(require_role("admin"))):
 @router.post("/config/agent")
 def update_agent_config(body: dict, _=Depends(require_role("admin"))):
     updated = 0
-    if "show_tool_process" in body:
-        set_config(
-            "AGENT_SHOW_TOOL_PROCESS",
-            "true" if body["show_tool_process"] else "false",
-        )
-        updated += 1
     if "max_tool_rounds" in body:
         try:
             rounds = max(1, min(10, int(body["max_tool_rounds"])))

@@ -202,6 +202,84 @@ describe('AiChatWidget', () => {
     wrapper.unmount()
   })
 
+  it('工具调用和原始工具结果不会进入聊天内容或历史', async () => {
+    let savedMessages = null
+    mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
+      if (url === '/api/ai/skills') return jsonResponse([])
+      if (url === '/api/ai/chat') {
+        return streamResponse(
+          'data: {"type":"tool_call","name":"weather_query","args":{"city":"武汉"}}\n\n'
+          + 'data: {"type":"tool_result","name":"weather_query","result":{"secret":"raw"}}\n\n'
+          + 'data: "武汉未来几天天气不错"\n\n'
+          + 'data: [DONE]\n\n',
+          options.signal,
+        )
+      }
+      if (url === '/api/ai/conversations' && options.method === 'POST') {
+        return jsonResponse({ id: 33, title: '新对话' })
+      }
+      if (url === '/api/ai/conversations/33/messages' && options.method === 'POST') {
+        savedMessages = JSON.parse(options.body)
+        return jsonResponse({ ok: true })
+      }
+      return jsonResponse({})
+    })
+
+    const wrapper = await mountWidget()
+    await flushPromises()
+    await wrapper.find('.ai-fab').trigger('click')
+    await wrapper.find('.chat-input').setValue('武汉天气')
+    await wrapper.find('.chat-send').trigger('click')
+    await flushPromises()
+
+    for (let i = 0; i < 20; i += 1) {
+      await runAnimationFrames()
+      await flushPromises()
+    }
+
+    await vi.waitFor(() => {
+      expect(savedMessages).not.toBeNull()
+    }, { timeout: 1000, interval: 10 })
+
+    expect(wrapper.text()).toContain('武汉未来几天天气不错')
+    expect(wrapper.text()).not.toContain('weather_query')
+    expect(wrapper.text()).not.toContain('调用工具')
+    expect(wrapper.text()).not.toContain('secret')
+    expect(savedMessages).toEqual([
+      { role: 'user', content: '武汉天气' },
+      { role: 'assistant', content: '武汉未来几天天气不错' },
+    ])
+
+    wrapper.unmount()
+  })
+
+  it('旧历史中的工具调试文本也不会展示给用户', async () => {
+    localStorage.setItem('ai_chat_history_admin', JSON.stringify([
+      {
+        role: 'assistant',
+        content: '\n\n🔧 调用工具: **weather_query**({"city":"武汉"})\n'
+          + '✅ 结果: {"secret":"raw"}\n\n武汉未来几天天气不错',
+      },
+    ]))
+    mockFetchWithAuth.mockImplementation(async (url) => {
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
+      if (url === '/api/ai/skills') return jsonResponse([])
+      return jsonResponse({})
+    })
+
+    const wrapper = await mountWidget()
+    await flushPromises()
+    await wrapper.find('.ai-fab').trigger('click')
+
+    expect(wrapper.text()).toContain('武汉未来几天天气不错')
+    expect(wrapper.text()).not.toContain('调用工具')
+    expect(wrapper.text()).not.toContain('weather_query')
+    expect(wrapper.text()).not.toContain('secret')
+
+    wrapper.unmount()
+  })
+
   it('新建会话只提交标题', async () => {
     let createBody = null
     mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
@@ -557,6 +635,92 @@ describe('AiChatWidget', () => {
     await flushPromises()
 
     expect(wrapper.get('.config-error').text()).toContain('请求地址无效')
+
+    wrapper.unmount()
+  })
+
+  it('AI 接口保存成功后展示明确提示', async () => {
+    authState.isAdmin = true
+    mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
+      if (url === '/api/ai/skills') return jsonResponse([])
+      if (url === '/api/ai/memory') return jsonResponse({ facts: [] })
+      if (url === '/api/ai/config/agent') {
+        return jsonResponse({ show_tool_process: true, max_tool_rounds: 5 })
+      }
+      if (url === '/api/ai/config/model' && !options.method) {
+        return jsonResponse({
+          base_url: 'https://example.com/v1',
+          api_key_configured: true,
+          model: 'model-a',
+          api_mode: 'responses',
+        })
+      }
+      if (url === '/api/ai/config/model' && options.method === 'POST') {
+        return jsonResponse({ ok: true })
+      }
+      return jsonResponse({})
+    })
+
+    const wrapper = await mountWidget()
+    await flushPromises()
+    await wrapper.find('.ai-fab').trigger('click')
+    await wrapper.find('[title="配置"]').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find((button) => button.text().includes('保存 AI 接口'))
+      .trigger('click')
+    await flushPromises()
+
+    await vi.waitFor(() => {
+      expect(wrapper.get('.config-success').text()).toContain('AI 接口配置已保存')
+    })
+
+    wrapper.unmount()
+  })
+
+  it('Agent 设置保存成功或失败时都有明确提示', async () => {
+    authState.isAdmin = true
+    let saveStatus = 200
+    mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
+      if (url === '/api/ai/skills') return jsonResponse([])
+      if (url === '/api/ai/memory') return jsonResponse({ facts: [] })
+      if (url === '/api/ai/config/model' && !options.method) {
+        return jsonResponse({
+          base_url: 'https://example.com/v1',
+          api_key_configured: true,
+          model: '',
+          api_mode: 'responses',
+        })
+      }
+      if (url === '/api/ai/config/agent' && !options.method) {
+        return jsonResponse({ show_tool_process: true, max_tool_rounds: 5 })
+      }
+      if (url === '/api/ai/config/agent' && options.method === 'POST') {
+        if (saveStatus === 200) return jsonResponse({ ok: true })
+        return jsonResponse({ detail: 'Agent 配置无效' }, 400)
+      }
+      return jsonResponse({})
+    })
+
+    const wrapper = await mountWidget()
+    await flushPromises()
+    await wrapper.find('.ai-fab').trigger('click')
+    await wrapper.find('[title="配置"]').trigger('click')
+    await flushPromises()
+    const saveAgent = () => wrapper.findAll('button')
+      .find((button) => button.text().includes('保存 Agent'))
+    await saveAgent().trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.config-success').text()).toContain('Agent 设置已保存')
+
+    saveStatus = 400
+    await saveAgent().trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.config-error').text()).toContain('Agent 配置无效')
 
     wrapper.unmount()
   })

@@ -451,7 +451,11 @@ def test_responses_agent_loop_streams_tools_and_omits_empty_model(monkeypatch):
     chunks = asyncio.run(run())
     assert "思考" in chunks
     assert "完成" in chunks
-    assert any(isinstance(item, dict) and item.get("type") == "tool_result" for item in chunks)
+    assert not any(
+        isinstance(item, dict)
+        and item.get("type") in {"tool_call", "tool_result"}
+        for item in chunks
+    )
     assert calls[0]["url"] == "https://proxy.example.com/v1/responses"
     assert "model" not in calls[0]["body"]
     assert calls[0]["body"]["instructions"] == "system"

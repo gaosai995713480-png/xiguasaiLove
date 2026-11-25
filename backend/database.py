@@ -578,7 +578,6 @@ def init_tables():
             ("AI_CHAT_API_KEY", ""),
             ("AI_CHAT_MODEL", ""),
             ("AI_CHAT_API_MODE", ""),
-            ("AGENT_SHOW_TOOL_PROCESS", "true"),
             ("AGENT_MAX_TOOL_ROUNDS", "5"),
             ("TRIPSTAR_ENABLED", "true"),
             ("TRIPSTAR_MOCK_MODE", "true"),

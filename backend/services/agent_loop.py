@@ -30,10 +30,6 @@ def _get_max_rounds() -> int:
         return 5
 
 
-def _show_tool_process() -> bool:
-    return get_config("AGENT_SHOW_TOOL_PROCESS") != "false"
-
-
 async def ai_agent_loop(
     base_url: str,
     api_key: str,
@@ -68,7 +64,6 @@ async def _chat_completions_agent_loop(
 ) -> AsyncGenerator[str, None]:
     tools = get_tools_for_chat_completions()
     max_rounds = await run_in_threadpool(_get_max_rounds)
-    show_process = await run_in_threadpool(_show_tool_process)
     url = build_llm_api_url(base_url, "chat_completions")
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -185,21 +180,16 @@ async def _chat_completions_agent_loop(
         )
 
         for tool_call in tool_calls_acc.values():
-            outcome: dict = {}
-            async for chunk in _execute_tool_with_events(
+            result = await _execute_tool_result(
                 tool_call["name"],
                 tool_call["arguments"],
-                tool_call["id"],
-                show_process,
-                outcome,
-            ):
-                yield chunk
+            )
 
             working_messages.append(
                 {
                     "role": "tool",
                     "tool_call_id": tool_call["id"],
-                    "content": outcome["result"],
+                    "content": result,
                 }
             )
 
@@ -260,7 +250,6 @@ async def _responses_agent_loop(
 ) -> AsyncGenerator[str, None]:
     tools = get_tools_for_responses()
     max_rounds = await run_in_threadpool(_get_max_rounds)
-    show_process = await run_in_threadpool(_show_tool_process)
     url = build_llm_api_url(base_url, "responses")
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -294,21 +283,16 @@ async def _responses_agent_loop(
         working_input.extend(output_items)
 
         for tool_call in tool_calls:
-            outcome: dict = {}
-            async for chunk in _execute_tool_with_events(
+            result = await _execute_tool_result(
                 tool_call["name"],
                 tool_call["arguments"],
-                tool_call["call_id"],
-                show_process,
-                outcome,
-            ):
-                yield chunk
+            )
 
             working_input.append(
                 {
                     "type": "function_call_output",
                     "call_id": tool_call["call_id"],
-                    "output": outcome["result"],
+                    "output": result,
                 }
             )
 
@@ -567,34 +551,9 @@ def _extract_response_output_text(output: list[dict]) -> str:
     return "".join(parts)
 
 
-async def _execute_tool_with_events(
-    name: str,
-    arguments: str,
-    call_id: str,
-    show_process: bool,
-    outcome: dict,
-) -> AsyncGenerator[str, None]:
+async def _execute_tool_result(name: str, arguments: str) -> str:
     try:
         args = json.loads(arguments or "{}")
     except json.JSONDecodeError:
         args = {}
-
-    if show_process:
-        yield json.dumps(
-            {
-                "type": "tool_call",
-                "name": name,
-                "args": args,
-                "call_id": call_id,
-            }
-        )
-    result = await execute_tool(name, args)
-    if show_process:
-        yield json.dumps(
-            {
-                "type": "tool_result",
-                "name": name,
-                "result": result,
-            }
-        )
-    outcome["result"] = result
+    return await execute_tool(name, args)

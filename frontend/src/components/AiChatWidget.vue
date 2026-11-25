@@ -53,6 +53,7 @@ function syncVisualViewport() {
 
 const ASSISTANT_NAME = 'AI 助手'
 const ASSISTANT_GREETING = `你好！我是 ${ASSISTANT_NAME}，有什么可以帮你的吗？ 😊`
+const LEGACY_TOOL_TRACE_PREFIX = /^(?:\s*🔧\s*调用工具:[\s\S]*?✅\s*结果:[\s\S]*?\n\n)+/
 const aiStatus = reactive({
   available: false,
   api_mode: 'responses',
@@ -83,9 +84,25 @@ function saveMessages() {
   } catch { /* 存储满容错 */ }
 }
 
+function stripLegacyToolTrace(content) {
+  if (typeof content !== 'string') return ''
+  return content.replace(LEGACY_TOOL_TRACE_PREFIX, '').trimStart()
+}
+
+function sanitizeMessages(messages) {
+  if (!Array.isArray(messages)) return []
+  return messages.map((message) => ({
+    ...message,
+    content: message?.role === 'assistant'
+      ? stripLegacyToolTrace(message.content)
+      : message?.content,
+  }))
+}
+
 // 配置面板
 const showConfig = ref(false)
 const configSaving = ref(false)
+const agentConfigSaving = ref(false)
 const aiConfig = ref({
   base_url: '',
   api_key: '',
@@ -93,12 +110,17 @@ const aiConfig = ref({
   api_mode: 'responses',
 })
 const configError = ref('')
+const aiSaveSuccess = ref('')
+const agentConfigError = ref('')
+const agentSaveSuccess = ref('')
+let aiSaveSuccessTimer = null
+let agentSaveSuccessTimer = null
 const availableModels = ref([])
 const modelsFetched = ref(false)
 const modelsLoading = ref(false)
 const modelsError = ref('')
 let modelsRequestSeq = 0
-const agentConfig = ref({ show_tool_process: true, max_tool_rounds: 5 })
+const agentConfig = ref({ max_tool_rounds: 5 })
 const aiApiKeyConfigured = ref(false)
 
 const modelOptions = computed(() => {
@@ -153,7 +175,6 @@ async function loadConfig({ resetModelList = true } = {}) {
       const aRes = await fetchWithAuth('/api/ai/config/agent')
       if (aRes.ok) {
         const d = await aRes.json()
-        agentConfig.value.show_tool_process = d.show_tool_process ?? true
         agentConfig.value.max_tool_rounds = d.max_tool_rounds ?? 5
       }
     } catch { /* ignore */ }
@@ -222,6 +243,7 @@ async function fetchAvailableModels() {
 async function saveAIConfig() {
   configSaving.value = true
   configError.value = ''
+  aiSaveSuccess.value = ''
   try {
     const res = await fetchWithAuth('/api/ai/config/model', {
       method: 'POST',
@@ -238,23 +260,47 @@ async function saveAIConfig() {
     }
     await loadConfig({ resetModelList: false })
     await checkStatus()
+    aiSaveSuccess.value = 'AI 接口配置已保存'
+    clearTimeout(aiSaveSuccessTimer)
+    aiSaveSuccessTimer = setTimeout(() => {
+      aiSaveSuccess.value = ''
+    }, 3000)
   } catch (error) {
     configError.value = error?.message || '保存失败，请检查配置'
+  } finally {
+    configSaving.value = false
   }
-  configSaving.value = false
 }
 
 // 保存 Agent 配置
 async function saveAgentConfig() {
-  configSaving.value = true
+  agentConfigSaving.value = true
+  agentConfigError.value = ''
+  agentSaveSuccess.value = ''
   try {
-    await fetchWithAuth('/api/ai/config/agent', {
+    const res = await fetchWithAuth('/api/ai/config/agent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(agentConfig.value),
     })
-  } catch { /* ignore */ }
-  configSaving.value = false
+    if (!res.ok) {
+      let detail = `保存失败 (${res.status})`
+      try {
+        const data = await res.json()
+        if (data?.detail) detail = String(data.detail)
+      } catch { /* 非 JSON 错误响应 */ }
+      throw new Error(detail)
+    }
+    agentSaveSuccess.value = 'Agent 设置已保存'
+    clearTimeout(agentSaveSuccessTimer)
+    agentSaveSuccessTimer = setTimeout(() => {
+      agentSaveSuccess.value = ''
+    }, 3000)
+  } catch (error) {
+    agentConfigError.value = error?.message || '保存失败，请检查配置'
+  } finally {
+    agentConfigSaving.value = false
+  }
 }
 
 function openConfig() {
@@ -436,7 +482,10 @@ async function openConversation(conv) {
       if (requestId !== historyRequestSeq) return
       const savedMessages = Array.isArray(data.messages) ? data.messages : []
       if (savedMessages.length > 0) {
-        currentMessages.value = savedMessages.map(m => ({ role: m.role, content: m.content }))
+        currentMessages.value = sanitizeMessages(savedMessages).map(m => ({
+          role: m.role,
+          content: m.content,
+        }))
       } else {
         currentMessages.value = [{ role: 'assistant', content: ASSISTANT_GREETING }]
       }
@@ -559,6 +608,8 @@ onUnmounted(() => {
   visualViewport = null
   abortController?.abort()
   cancelTypewriter()
+  clearTimeout(aiSaveSuccessTimer)
+  clearTimeout(agentSaveSuccessTimer)
 })
 
 function openChat() {
@@ -624,7 +675,7 @@ function initMessages() {
 
   const saved = loadMessages()
   if (saved.length > 0) {
-    currentMessages.value = saved
+    currentMessages.value = sanitizeMessages(saved)
   } else {
     currentMessages.value.push({ role: 'assistant', content: ASSISTANT_GREETING })
   }
@@ -780,14 +831,13 @@ async function sendMessage() {
 
         try {
           const parsed = JSON.parse(data)
-          // Agent 工具调用事件
-          if (parsed && typeof parsed === 'object' && parsed.type === 'tool_call') {
-            textBuffer += `\n\n🔧 调用工具: **${parsed.name}**(${JSON.stringify(parsed.args || {})})\n`
-          } else if (parsed && typeof parsed === 'object' && parsed.type === 'tool_result') {
-            let resultText = parsed.result
-            try { resultText = typeof resultText === 'string' ? resultText : JSON.stringify(resultText) } catch {}
-            if (resultText && resultText.length > 200) resultText = resultText.slice(0, 200) + '...'
-            textBuffer += `✅ 结果: ${resultText}\n\n`
+          if (
+            parsed
+            && typeof parsed === 'object'
+            && (parsed.type === 'tool_call' || parsed.type === 'tool_result')
+          ) {
+            // 工具执行细节只用于服务端内部编排，不进入聊天内容或历史。
+            continue
           } else if (parsed && typeof parsed === 'object' && parsed.type === 'error') {
             textBuffer += `\n[错误] ${parsed.content}\n`
           } else if (typeof parsed === 'string') {
@@ -1181,24 +1231,20 @@ async function handleBubbleClick(e) {
                 </div>
               </div>
               <button class="config-save" :disabled="!aiConfig.base_url || !hasConfiguredApiKey(aiConfig) || configSaving" @click="saveAIConfig">{{ configSaving ? '保存中...' : '💾 保存 AI 接口' }}</button>
-              <div v-if="configError" class="config-error">{{ configError }}</div>
+              <div v-if="configError" class="config-error" role="alert">{{ configError }}</div>
+              <div v-if="aiSaveSuccess" class="config-success" role="status">✅ {{ aiSaveSuccess }}</div>
             </div>
 
             <div class="config-divider"></div>
             <div class="config-section">
               <div class="config-section-title">🤖 Agent 设置</div>
               <div class="config-field">
-                <label>显示工具调用过程</label>
-                <label class="toggle-switch">
-                  <input type="checkbox" v-model="agentConfig.show_tool_process" />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-              <div class="config-field">
                 <label>最大工具调用轮数</label>
                 <input v-model.number="agentConfig.max_tool_rounds" type="number" min="1" max="10" style="width: 60px" />
               </div>
-              <button class="config-save" :disabled="configSaving" @click="saveAgentConfig">{{ configSaving ? '保存中...' : '💾 保存 Agent' }}</button>
+              <button class="config-save" :disabled="agentConfigSaving" @click="saveAgentConfig">{{ agentConfigSaving ? '保存中...' : '💾 保存 Agent' }}</button>
+              <div v-if="agentConfigError" class="config-error" role="alert">{{ agentConfigError }}</div>
+              <div v-if="agentSaveSuccess" class="config-success" role="status">✅ {{ agentSaveSuccess }}</div>
             </div>
           </template>
         </div>
@@ -1487,6 +1533,11 @@ async function handleBubbleClick(e) {
 .config-save:disabled { opacity: 0.4; cursor: not-allowed; }
 .config-error {
   color: #fca5a5;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.config-success {
+  color: #86efac;
   font-size: 12px;
   line-height: 1.4;
 }
@@ -2013,34 +2064,6 @@ async function handleBubbleClick(e) {
     opacity: 0.72;
   }
 }
-
-/* ===== Toggle Switch ===== */
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 40px;
-  height: 22px;
-  cursor: pointer;
-}
-.toggle-switch input { opacity: 0; width: 0; height: 0; }
-.toggle-slider {
-  position: absolute;
-  inset: 0;
-  background: rgba(255,255,255,0.15);
-  border-radius: 22px;
-  transition: 0.3s;
-}
-.toggle-slider::before {
-  content: '';
-  position: absolute;
-  width: 16px; height: 16px;
-  left: 3px; bottom: 3px;
-  background: #fff;
-  border-radius: 50%;
-  transition: 0.3s;
-}
-.toggle-switch input:checked + .toggle-slider { background: #a78bfa; }
-.toggle-switch input:checked + .toggle-slider::before { transform: translateX(18px); }
 
 </style>
 
