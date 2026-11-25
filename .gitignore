@@ -24,3 +24,6 @@ work/
 
 # 用户级 agent 配置（junction 到 %USERPROFILE%\.agents，不入库）
 .agents/
+
+# 旧 Superpowers 脑暴产物
+.superpowers/
