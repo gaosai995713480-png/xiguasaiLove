@@ -18,7 +18,7 @@ from ..services.ai_chat import (
     get_ai_config,
     is_ai_configured,
 )
-from ..services.llm_urls import SUPPORTED_API_MODES
+from ..services.llm_urls import SUPPORTED_API_MODES, build_models_api_urls
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,11 @@ class ChatRequest(BaseModel):
     skill_id: Optional[int] = Field(default=None)
     conversation_id: Optional[int] = Field(default=None)
     client_context: Optional[str] = Field(default=None, max_length=_MAX_CLIENT_CONTEXT)
+
+
+class ModelsRequest(BaseModel):
+    base_url: Optional[str] = Field(default=None, max_length=2000)
+    api_key: Optional[str] = Field(default=None, max_length=10000)
 
 
 async def _sse_generator(messages: list[dict]):
@@ -87,6 +92,39 @@ def _mask_secret(value: str) -> str:
     if not value:
         return ""
     return value[:8] + "****" + value[-4:] if len(value) > 16 else "****"
+
+
+def _extract_model_ids(payload) -> list[str]:
+    if isinstance(payload, dict):
+        raw_items = payload.get("data")
+        if raw_items is None:
+            raw_items = payload.get("models")
+    else:
+        raw_items = payload
+    if not isinstance(raw_items, list):
+        return []
+
+    models: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        if isinstance(item, str):
+            model_id = item.strip()
+        elif isinstance(item, dict):
+            model_id = str(
+                item.get("id")
+                or item.get("model")
+                or item.get("name")
+                or ""
+            ).strip()
+        else:
+            model_id = ""
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        models.append(model_id)
+        if len(models) >= 200:
+            break
+    return models
 
 
 @router.get("/status")
@@ -246,6 +284,57 @@ def update_model_config(body: dict, _=Depends(require_role("admin"))):
     for config_key, value in updates.items():
         set_config(config_key, value)
     return {"ok": True, "updated": len(updates), "updated_keys": sorted(updates)}
+
+
+@router.post("/models")
+async def list_models(body: ModelsRequest, _=Depends(require_role("admin"))):
+    cfg = get_ai_config()
+    base_url = (body.base_url or cfg["base_url"]).strip()
+    api_key = (body.api_key or cfg["api_key"]).strip()
+    if not base_url:
+        raise HTTPException(status_code=400, detail="请求地址不能为空")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key 不能为空")
+
+    import httpx
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    last_status = None
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            for url in build_models_api_urls(base_url):
+                response = await client.get(url, headers=headers)
+                last_status = response.status_code
+                if response.status_code in (404, 405):
+                    continue
+                if response.status_code != 200:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"模型列表接口返回 {response.status_code}",
+                    )
+                try:
+                    payload = response.json()
+                except ValueError as exc:
+                    raise HTTPException(
+                        status_code=502,
+                        detail="模型列表接口返回了无法解析的 JSON",
+                    ) from exc
+                return {"models": _extract_model_ids(payload)}
+    except HTTPException:
+        raise
+    except httpx.HTTPError as exc:
+        logger.warning("获取模型列表失败: %s", exc)
+        raise HTTPException(status_code=502, detail="无法连接模型列表接口") from exc
+
+    detail = (
+        f"模型列表接口返回 {last_status}"
+        if last_status is not None
+        else "模型列表接口不可用"
+    )
+    raise HTTPException(status_code=502, detail=detail)
 
 
 @router.get("/config/agent")

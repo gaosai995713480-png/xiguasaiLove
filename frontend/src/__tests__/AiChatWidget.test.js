@@ -298,8 +298,8 @@ describe('AiChatWidget', () => {
       'API Key',
       '模型（可选）',
     ])
-    const modeSelect = aiSection.get('select')
-    expect(modeSelect.element.value).toBe('responses')
+    const modeTrigger = aiSection.get('[aria-label="接口类型"]')
+    expect(modeTrigger.text()).toContain('Responses API（默认）')
     const modelInput = aiSection.findAll('input').find((input) => (
       input.element.placeholder === '留空则由上游决定'
     ))
@@ -316,10 +316,209 @@ describe('AiChatWidget', () => {
       api_mode: 'responses',
     })
 
-    await modeSelect.setValue('chat_completions')
+    await wrapper.get('[aria-label="接口类型"]').trigger('click')
+    const chatOption = wrapper.findAll('.dark-select-option')
+      .find((option) => option.text().includes('Chat Completions'))
+    await chatOption.trigger('click')
+    await flushPromises()
     await saveAI.trigger('click')
     await flushPromises()
     expect(savedBody.api_mode).toBe('chat_completions')
+
+    wrapper.unmount()
+  })
+
+  it('可以获取可用模型并选择后保存', async () => {
+    authState.isAdmin = true
+    let modelsBody = null
+    let savedBody = null
+    mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
+      if (url === '/api/ai/skills') return jsonResponse([])
+      if (url === '/api/ai/memory') return jsonResponse({ facts: [] })
+      if (url === '/api/ai/config/agent') {
+        return jsonResponse({ show_tool_process: true, max_tool_rounds: 5 })
+      }
+      if (url === '/api/ai/config/model' && !options.method) {
+        return jsonResponse({
+          base_url: 'https://example.com/v1',
+          api_key_configured: true,
+          api_key_masked: 'sk-****',
+          model: '',
+          api_mode: 'responses',
+        })
+      }
+      if (url === '/api/ai/models' && options.method === 'POST') {
+        modelsBody = JSON.parse(options.body)
+        return jsonResponse({
+          models: ['grok-4.20-fast', 'gpt-5.4-codex'],
+        })
+      }
+      if (url === '/api/ai/config/model' && options.method === 'POST') {
+        savedBody = JSON.parse(options.body)
+        return jsonResponse({ ok: true })
+      }
+      return jsonResponse({})
+    })
+
+    const wrapper = await mountWidget()
+    await flushPromises()
+    await wrapper.find('.ai-fab').trigger('click')
+    await wrapper.find('[title="配置"]').trigger('click')
+    await flushPromises()
+
+    const fetchModels = wrapper.findAll('button')
+      .find((button) => button.text().includes('获取模型'))
+    expect(fetchModels.attributes('disabled')).toBeUndefined()
+    await fetchModels.trigger('click')
+    await flushPromises()
+
+    expect(modelsBody).toEqual({
+      base_url: 'https://example.com/v1',
+      api_key: '',
+    })
+    expect(wrapper.get('[aria-label="选择模型"]').text()).toContain('留空（由上游决定）')
+    await wrapper.get('[aria-label="选择模型"]').trigger('click')
+    const modelOption = wrapper.findAll('.dark-select-option')
+      .find((option) => option.text().includes('grok-4.20-fast'))
+    await modelOption.trigger('click')
+    await flushPromises()
+
+    await wrapper.findAll('button')
+      .find((button) => button.text().includes('保存 AI 接口'))
+      .trigger('click')
+    await flushPromises()
+
+    expect(savedBody.model).toBe('grok-4.20-fast')
+
+    wrapper.unmount()
+  })
+
+  it('获取模型失败时展示后端错误', async () => {
+    authState.isAdmin = true
+    mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
+      if (url === '/api/ai/skills') return jsonResponse([])
+      if (url === '/api/ai/memory') return jsonResponse({ facts: [] })
+      if (url === '/api/ai/config/agent') {
+        return jsonResponse({ show_tool_process: true, max_tool_rounds: 5 })
+      }
+      if (url === '/api/ai/config/model' && !options.method) {
+        return jsonResponse({
+          base_url: 'https://example.com/v1',
+          api_key_configured: true,
+          model: '',
+          api_mode: 'responses',
+        })
+      }
+      if (url === '/api/ai/models' && options.method === 'POST') {
+        return jsonResponse({ detail: '模型接口返回 502' }, 502)
+      }
+      return jsonResponse({})
+    })
+
+    const wrapper = await mountWidget()
+    await flushPromises()
+    await wrapper.find('.ai-fab').trigger('click')
+    await wrapper.find('[title="配置"]').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find((button) => button.text().includes('获取模型'))
+      .trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.config-error').text()).toContain('模型接口返回 502')
+
+    wrapper.unmount()
+  })
+
+  it('缺少 API Key 时禁用获取模型按钮', async () => {
+    authState.isAdmin = true
+    mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
+      if (url === '/api/ai/skills') return jsonResponse([])
+      if (url === '/api/ai/memory') return jsonResponse({ facts: [] })
+      if (url === '/api/ai/config/agent') {
+        return jsonResponse({ show_tool_process: true, max_tool_rounds: 5 })
+      }
+      if (url === '/api/ai/config/model' && !options.method) {
+        return jsonResponse({
+          base_url: 'https://example.com/v1',
+          api_key_configured: false,
+          model: '',
+          api_mode: 'responses',
+        })
+      }
+      return jsonResponse({})
+    })
+
+    const wrapper = await mountWidget()
+    await flushPromises()
+    await wrapper.find('.ai-fab').trigger('click')
+    await wrapper.find('[title="配置"]').trigger('click')
+    await flushPromises()
+
+    const fetchModels = wrapper.findAll('button')
+      .find((button) => button.text().includes('获取模型'))
+    expect(fetchModels.attributes('disabled')).toBeDefined()
+
+    await wrapper.findAll('input')
+      .find((input) => input.element.type === 'password')
+      .setValue('sk-test')
+    expect(fetchModels.attributes('disabled')).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  it('获取模型期间显示加载态，空列表保留手动输入', async () => {
+    authState.isAdmin = true
+    let resolveModels
+    const modelsResponse = new Promise((resolve) => {
+      resolveModels = resolve
+    })
+    mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
+      if (url === '/api/ai/skills') return jsonResponse([])
+      if (url === '/api/ai/memory') return jsonResponse({ facts: [] })
+      if (url === '/api/ai/config/agent') {
+        return jsonResponse({ show_tool_process: true, max_tool_rounds: 5 })
+      }
+      if (url === '/api/ai/config/model' && !options.method) {
+        return jsonResponse({
+          base_url: 'https://example.com/v1',
+          api_key_configured: true,
+          model: '',
+          api_mode: 'responses',
+        })
+      }
+      if (url === '/api/ai/models' && options.method === 'POST') {
+        return modelsResponse
+      }
+      return jsonResponse({})
+    })
+
+    const wrapper = await mountWidget()
+    await flushPromises()
+    await wrapper.find('.ai-fab').trigger('click')
+    await wrapper.find('[title="配置"]').trigger('click')
+    await flushPromises()
+
+    const fetchModels = wrapper.findAll('button')
+      .find((button) => button.text().includes('获取模型'))
+    await fetchModels.trigger('click')
+    await flushPromises()
+    const loadingButton = wrapper.findAll('button')
+      .find((button) => button.text().includes('获取中...'))
+    expect(loadingButton.attributes('disabled')).toBeDefined()
+
+    resolveModels(jsonResponse({ models: [] }))
+    await flushPromises()
+
+    expect(wrapper.find('[aria-label="选择模型"]').exists()).toBe(false)
+    const manualModel = wrapper.findAll('input')
+      .find((input) => input.element.placeholder === '留空则由上游决定')
+    expect(manualModel.exists()).toBe(true)
+    expect(wrapper.get('.config-error').text()).toContain('未获取到可用模型')
 
     wrapper.unmount()
   })

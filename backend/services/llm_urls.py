@@ -30,3 +30,43 @@ def build_llm_api_url(base_url: str, api_mode: str = DEFAULT_API_MODE) -> str:
     return urlunsplit(
         (parts.scheme, parts.netloc, path, parts.query, parts.fragment)
     )
+
+
+def build_models_api_urls(base_url: str) -> list[str]:
+    """Build model-list candidates from a root, /v1 or complete API URL."""
+    base = (base_url or "").strip().rstrip("/")
+    if not base:
+        return []
+
+    parts = urlsplit(base)
+    path = parts.path.rstrip("/")
+    for suffix in _ENDPOINT_SUFFIX.values():
+        if path.endswith(suffix):
+            path = path[: -len(suffix)]
+            break
+
+    models_path = path if path.endswith("/models") else f"{path}/models"
+    candidates = [
+        urlunsplit(
+            (
+                parts.scheme,
+                parts.netloc,
+                models_path,
+                parts.query,
+                parts.fragment,
+            )
+        )
+    ]
+    if not path:
+        candidates.append(
+            urlunsplit(
+                (
+                    parts.scheme,
+                    parts.netloc,
+                    "/v1/models",
+                    parts.query,
+                    parts.fragment,
+                )
+            )
+        )
+    return list(dict.fromkeys(candidates))

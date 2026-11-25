@@ -145,7 +145,8 @@ OSS、快递100、AI 接口、音乐 Cookie 和部分 TripStar 配置主要保�
 AI 助手与 TripStar 共用一个 OpenAI 兼容接口。管理页配置请求地址、API Key、
 可选模型和接口类型（`responses` 默认，或 `chat_completions`）：运行期优先读取
 `AI_CHAT_*` 对应的数据库配置，数据库值为空时才使用同名环境变量兜底。
-模型留空时请求不发送 `model` 字段。
+模型留空时请求不发送 `model` 字段；也可以先通过管理页的“获取模型”读取上游
+可用模型列表，再直接选择。
 
 > ⚠️ 请勿将 `.env` 提交到仓库（已在 `.gitignore` 中排除）
 

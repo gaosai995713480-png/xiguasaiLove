@@ -18,7 +18,11 @@ from backend.services.agent_tools import (
     set_current_user_context,
 )
 from backend.services.ai_chat import get_ai_config
-from backend.services.llm_urls import build_llm_api_url, normalize_api_mode
+from backend.services.llm_urls import (
+    build_llm_api_url,
+    build_models_api_urls,
+    normalize_api_mode,
+)
 
 
 client = TestClient(app)
@@ -60,6 +64,18 @@ def test_api_url_builder_handles_both_modes_and_base_styles():
     assert normalize_api_mode("") == "responses"
     assert normalize_api_mode("unknown") == "responses"
     assert normalize_api_mode("chat_completions") == "chat_completions"
+    assert build_models_api_urls("https://proxy.example.com") == [
+        "https://proxy.example.com/models",
+        "https://proxy.example.com/v1/models",
+    ]
+    assert build_models_api_urls(
+        "https://proxy.example.com/v1/responses?api-version=2026-01-01"
+    ) == [
+        "https://proxy.example.com/v1/models?api-version=2026-01-01"
+    ]
+    assert build_models_api_urls("https://proxy.example.com/v1/models") == [
+        "https://proxy.example.com/v1/models"
+    ]
 
 
 def test_ai_config_falls_back_to_environment_and_defaults_to_responses(monkeypatch):
@@ -213,6 +229,137 @@ def test_model_config_rejects_empty_base_url(monkeypatch):
     )
 
     assert response.status_code == 400
+
+
+def test_model_list_endpoint_uses_form_values_and_root_fallback(monkeypatch):
+    _login_admin()
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code, payload=None):
+            self.status_code = status_code
+            self.payload = payload or {}
+
+        def json(self):
+            return self.payload
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            calls.append({"url": url, "headers": headers})
+            if url.endswith("/models") and "/v1/models" not in url:
+                return FakeResponse(404)
+            return FakeResponse(
+                200,
+                {
+                    "data": [
+                        {"id": "gpt-5.4-codex"},
+                        {"id": "grok-4.20-fast"},
+                        {"id": "gpt-5.4-codex"},
+                        {"name": "deepseek-chat"},
+                    ]
+                },
+            )
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.post(
+        "/api/ai/models",
+        json={
+            "base_url": "https://proxy.example.com",
+            "api_key": "form-key",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "models": [
+            "gpt-5.4-codex",
+            "grok-4.20-fast",
+            "deepseek-chat",
+        ]
+    }
+    assert [call["url"] for call in calls] == [
+        "https://proxy.example.com/models",
+        "https://proxy.example.com/v1/models",
+    ]
+    assert calls[0]["headers"]["Authorization"] == "Bearer form-key"
+
+
+def test_model_list_endpoint_can_reuse_saved_api_key(monkeypatch):
+    _login_admin()
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"models": ["model-a"]}
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            calls.append({"url": url, "headers": headers})
+            return FakeResponse()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(
+        ai_router,
+        "get_ai_config",
+        lambda: {
+            "base_url": "https://saved.example/v1",
+            "api_key": "saved-key",
+            "model": "",
+            "api_mode": "responses",
+        },
+    )
+
+    response = client.post(
+        "/api/ai/models",
+        json={"base_url": "", "api_key": ""},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"models": ["model-a"]}
+    assert calls[0]["url"] == "https://saved.example/v1/models"
+    assert calls[0]["headers"]["Authorization"] == "Bearer saved-key"
+
+
+def test_model_list_endpoint_requires_admin():
+    token = secrets.token_urlsafe(24)
+    _cache_session(
+        token,
+        UserInfo(username="ai_models_visitor", role="visitor"),
+        time.time() + 3600,
+    )
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+
+    response = client.post(
+        "/api/ai/models",
+        json={"base_url": "https://proxy.example.com/v1", "api_key": "key"},
+    )
+
+    assert response.status_code == 403
 
 
 def test_removed_provider_config_routes_are_not_available():

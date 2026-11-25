@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/auth'
 import { useContextStore } from '../stores/context'
 import { fetchWithAuth } from '../api'
 import { renderMarkdown as renderSafeMarkdown } from '../utils/markdown'
+import DarkSelect from './DarkSelect.vue'
 
 const authStore = useAuthStore()
 const contextStore = useContextStore()
@@ -92,8 +93,32 @@ const aiConfig = ref({
   api_mode: 'responses',
 })
 const configError = ref('')
+const availableModels = ref([])
+const modelsFetched = ref(false)
+const modelsLoading = ref(false)
+const modelsError = ref('')
+let modelsRequestSeq = 0
 const agentConfig = ref({ show_tool_process: true, max_tool_rounds: 5 })
 const aiApiKeyConfigured = ref(false)
+
+const modelOptions = computed(() => {
+  const options = [...availableModels.value]
+  const currentModel = aiConfig.value.model.trim()
+  if (currentModel && !options.includes(currentModel)) {
+    options.unshift(currentModel)
+  }
+  return options
+})
+
+const API_MODE_OPTIONS = [
+  { value: 'responses', label: 'Responses API（默认）' },
+  { value: 'chat_completions', label: 'Chat Completions' },
+]
+
+const modelSelectOptions = computed(() => [
+  { value: '', label: '留空（由上游决定）' },
+  ...modelOptions.value.map((model) => ({ value: model, label: model })),
+])
 
 // 检查统一 AI 接口状态
 async function checkStatus() {
@@ -110,8 +135,9 @@ async function checkStatus() {
 }
 
 // 加载配置
-async function loadConfig() {
+async function loadConfig({ resetModelList = true } = {}) {
   configError.value = ''
+  if (resetModelList) resetModels()
   try {
     const res = await fetchWithAuth('/api/ai/config/model')
     if (res.ok) {
@@ -134,6 +160,64 @@ async function loadConfig() {
   } catch { /* ignore */ }
 }
 
+function resetModels() {
+  modelsRequestSeq += 1
+  availableModels.value = []
+  modelsFetched.value = false
+  modelsLoading.value = false
+  modelsError.value = ''
+}
+
+async function fetchAvailableModels() {
+  const baseUrl = aiConfig.value.base_url.trim()
+  if (!baseUrl || !hasConfiguredApiKey(aiConfig.value)) return
+
+  const requestId = ++modelsRequestSeq
+  modelsLoading.value = true
+  modelsError.value = ''
+  try {
+    const res = await fetchWithAuth('/api/ai/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base_url: baseUrl,
+        api_key: aiConfig.value.api_key.trim(),
+      }),
+    })
+    let data = {}
+    try {
+      data = await res.json()
+    } catch { /* 非 JSON 错误响应 */ }
+    if (!res.ok) {
+      const detail = data?.detail
+      throw new Error(
+        typeof detail === 'string' && detail
+          ? detail
+          : `获取模型失败 (${res.status})`,
+      )
+    }
+    if (requestId !== modelsRequestSeq) return
+
+    const models = Array.isArray(data?.models) ? data.models : []
+    availableModels.value = [...new Set(
+      models
+        .map((model) => String(model || '').trim())
+        .filter(Boolean),
+    )]
+    modelsFetched.value = true
+    if (availableModels.value.length === 0) {
+      modelsError.value = '未获取到可用模型，请手动填写'
+    }
+  } catch (error) {
+    if (requestId !== modelsRequestSeq) return
+    availableModels.value = []
+    modelsFetched.value = false
+    modelsError.value = error?.message || '获取模型失败，请检查接口配置'
+  } finally {
+    if (requestId === modelsRequestSeq) modelsLoading.value = false
+  }
+}
+
 // 保存统一 AI 接口配置
 async function saveAIConfig() {
   configSaving.value = true
@@ -152,7 +236,7 @@ async function saveAIConfig() {
       } catch { /* 非 JSON 错误响应 */ }
       throw new Error(detail)
     }
-    await loadConfig()
+    await loadConfig({ resetModelList: false })
     await checkStatus()
   } catch (error) {
     configError.value = error?.message || '保存失败，请检查配置'
@@ -1064,14 +1148,38 @@ async function handleBubbleClick(e) {
               <div class="config-hint">💡 支持根地址、/v1 或对应的完整接口地址</div>
               <div class="config-field">
                 <label>接口类型</label>
-                <select v-model="aiConfig.api_mode">
-                  <option value="responses">Responses API（默认）</option>
-                  <option value="chat_completions">Chat Completions</option>
-                </select>
+                <DarkSelect
+                  v-model="aiConfig.api_mode"
+                  :options="API_MODE_OPTIONS"
+                  aria-label="接口类型"
+                />
               </div>
-              <div class="config-field"><label>请求地址</label><input v-model="aiConfig.base_url" type="text" placeholder="https://example.com/v1" /></div>
-              <div class="config-field"><label>API Key</label><input v-model="aiConfig.api_key" type="password" placeholder="sk-..." /></div>
-              <div class="config-field"><label>模型（可选）</label><input v-model="aiConfig.model" type="text" placeholder="留空则由上游决定" /></div>
+              <div class="config-field"><label>请求地址</label><input v-model="aiConfig.base_url" type="text" placeholder="https://example.com/v1" @input="resetModels" /></div>
+              <div class="config-field"><label>API Key</label><input v-model="aiConfig.api_key" type="password" placeholder="sk-..." @input="resetModels" /></div>
+              <div class="config-field">
+                <label>模型（可选）</label>
+                <div class="model-picker-row">
+                  <DarkSelect
+                    v-if="availableModels.length"
+                    v-model="aiConfig.model"
+                    :options="modelSelectOptions"
+                    aria-label="选择模型"
+                  />
+                  <input v-else v-model="aiConfig.model" type="text" placeholder="留空则由上游决定" />
+                  <button
+                    type="button"
+                    class="config-secondary-btn"
+                    :disabled="modelsLoading || !aiConfig.base_url.trim() || !hasConfiguredApiKey(aiConfig)"
+                    @click="fetchAvailableModels"
+                  >
+                    {{ modelsLoading ? '获取中...' : modelsFetched ? '刷新模型' : '获取模型' }}
+                  </button>
+                </div>
+                <div v-if="modelsError" class="config-error">{{ modelsError }}</div>
+                <div v-else-if="availableModels.length" class="config-hint">
+                  已获取 {{ availableModels.length }} 个模型，请选择一个
+                </div>
+              </div>
               <button class="config-save" :disabled="!aiConfig.base_url || !hasConfiguredApiKey(aiConfig) || configSaving" @click="saveAIConfig">{{ configSaving ? '保存中...' : '💾 保存 AI 接口' }}</button>
               <div v-if="configError" class="config-error">{{ configError }}</div>
             </div>
@@ -1330,6 +1438,42 @@ async function handleBubbleClick(e) {
 }
 .config-field input:focus, .config-field select:focus { border-color: rgba(102, 126, 234, 0.5); }
 .config-field input::placeholder { color: rgba(255,255,255,0.3); }
+.model-picker-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.model-picker-row > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.model-picker-row :deep(.dark-select) {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.config-secondary-btn {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 7px 11px;
+  border: 1px solid rgba(102, 126, 234, 0.32);
+  border-radius: 8px;
+  background: rgba(102, 126, 234, 0.12);
+  color: #c7d2fe;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+.config-secondary-btn:hover:not(:disabled) {
+  border-color: rgba(102, 126, 234, 0.55);
+  background: rgba(102, 126, 234, 0.22);
+  color: #fff;
+}
+.config-secondary-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 .config-save {
   padding: 10px; border: none; border-radius: 10px;
   background: linear-gradient(135deg, #667eea, #764ba2);
@@ -1857,6 +2001,10 @@ async function handleBubbleClick(e) {
 
   .chat-history-panel {
     border-radius: 0;
+  }
+
+  .config-secondary-btn {
+    min-height: 44px;
   }
 }
 
