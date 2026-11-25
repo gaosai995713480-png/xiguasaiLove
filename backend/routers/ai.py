@@ -1,37 +1,27 @@
-"""AI 聊天路由 — 多供应商独立架构"""
+"""Single AI chat and OpenAI-compatible endpoint settings."""
+import json
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
-from typing import Optional
 
-from ..database import get_config, set_config, get_db
+from ..database import get_config, get_db, set_config
 from ..dependencies import require_auth, require_role
 from ..services.ai_chat import (
-    get_provider,
-    get_claude_config,
-    get_codex_config,
-    get_glm_config,
-    get_grok_config,
-    CLAUDE_BASE_URL_KEY,
-    CLAUDE_API_KEY_KEY,
-    CLAUDE_MODEL_KEY,
-    CODEX_BASE_URL_KEY,
-    CODEX_API_KEY_KEY,
-    CODEX_MODEL_KEY,
-    GLM_BASE_URL_KEY,
-    GLM_API_KEY_KEY,
-    GLM_MODEL_KEY,
-    GROK_BASE_URL_KEY,
-    GROK_API_KEY_KEY,
-    GROK_MODEL_KEY,
+    AI_API_KEY_KEY,
+    AI_API_MODE_KEY,
+    AI_BASE_URL_KEY,
+    AI_MODEL_KEY,
+    get_ai_config,
+    is_ai_configured,
 )
+from ..services.llm_urls import SUPPORTED_API_MODES
 
 logger = logging.getLogger(__name__)
 
-# 记忆提取后台任务引用：asyncio.create_task 若不持有引用，任务可能被 GC 中断
 _memory_tasks: set = set()
 _MAX_CHAT_HISTORY = 100
 _MAX_CHAT_CONTENT = 50000
@@ -39,8 +29,6 @@ _MAX_CLIENT_CONTEXT = 4000
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
-
-# ==================== 请求模型 ====================
 
 class ChatMessage(BaseModel):
     role: str = Field(default="user", pattern="^(user|assistant|system)$")
@@ -50,49 +38,34 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=10000)
     history: list[ChatMessage] = Field(default_factory=list, max_length=_MAX_CHAT_HISTORY)
-    provider: str = Field(default="codex", pattern="^(claude|codex|glm|grok)$")
     skill_id: Optional[int] = Field(default=None)
     conversation_id: Optional[int] = Field(default=None)
     client_context: Optional[str] = Field(default=None, max_length=_MAX_CLIENT_CONTEXT)
 
 
-# ==================== SSE 生成器 ====================
-
-import json
-
-async def _sse_generator(provider_name: str, messages: list[dict]):
-    """将 Provider 的流式输出包装为 SSE 格式，Codex/Claude 走 Agent Loop"""
+async def _sse_generator(messages: list[dict]):
     try:
-        provider = await run_in_threadpool(get_provider, provider_name)
-        if not provider.is_available():
-            labels = {"claude": "Claude API", "codex": "Codex API", "glm": "GLM API", "grok": "Grok API"}
-            label = labels.get(provider_name, provider_name)
-            error_msg = f"[错误] {label} 未配置，请管理员在设置中配置"
+        cfg = await run_in_threadpool(get_ai_config)
+        if not is_ai_configured(cfg):
+            error_msg = "[错误] AI 接口未配置，请管理员在设置中填写请求地址和 API Key"
             yield f"data: {json.dumps(error_msg)}\n\n"
             return
 
-        # Codex / Claude 走 Agent Loop（支持工具调用）
-        if provider_name in ("codex", "claude"):
-            from ..services.agent_loop import codex_agent_loop, claude_agent_loop
-            if provider_name == "codex":
-                cfg = await run_in_threadpool(get_codex_config)
-                gen = codex_agent_loop(cfg["base_url"], cfg["api_key"], cfg["model"], messages)
-            else:
-                cfg = await run_in_threadpool(get_claude_config)
-                gen = claude_agent_loop(cfg["base_url"], cfg["api_key"], cfg["model"], messages)
+        from ..services.agent_loop import ai_agent_loop
 
-            async for chunk in gen:
-                yield f"data: {chunk}\n\n"
-        else:
-            # GLM / Grok 走纯对话模式
-            async for chunk in provider.stream_chat(messages):
-                yield f"data: {json.dumps(chunk)}\n\n"
+        async for chunk in ai_agent_loop(
+            cfg["base_url"],
+            cfg["api_key"],
+            cfg["model"],
+            cfg["api_mode"],
+            messages,
+        ):
+            yield f"data: {chunk}\n\n"
 
         yield "data: [DONE]\n\n"
-
-    except Exception as e:
-        logger.error("AI 聊天异常 [%s]: %s", provider_name, e, exc_info=True)
-        yield f"data: {json.dumps('[错误] ' + str(e))}\n\n"
+    except Exception as exc:
+        logger.error("AI 聊天异常: %s", exc, exc_info=True)
+        yield f"data: {json.dumps('[错误] ' + str(exc))}\n\n"
 
 
 def _load_skill_prompt(skill_id: int, username: str) -> str:
@@ -105,58 +78,48 @@ def _load_skill_prompt(skill_id: int, username: str) -> str:
                 )
                 row = cur.fetchone()
                 return str(row[0]) if row and row[0] else ""
-    except Exception as e:
-        logger.warning("查询 Skill 失败: %s", e)
+    except Exception as exc:
+        logger.warning("查询 Skill 失败: %s", exc)
         return ""
 
 
-# ==================== 路由 ====================
+def _mask_secret(value: str) -> str:
+    if not value:
+        return ""
+    return value[:8] + "****" + value[-4:] if len(value) > 16 else "****"
+
 
 @router.get("/status")
 def ai_status(_=Depends(require_auth)):
-    """检查各供应商的可用状态"""
-    claude_provider = get_provider("claude")
-    codex_provider = get_provider("codex")
-    glm_provider = get_provider("glm")
-    grok_provider = get_provider("grok")
-    codex_cfg = get_codex_config()
-    glm_cfg = get_glm_config()
-    grok_cfg = get_grok_config()
-    claude_cfg = get_claude_config()
+    cfg = get_ai_config()
     return {
-        "claude": {
-            "available": claude_provider.is_available(),
-            "model": claude_cfg["model"],
-            "base_url": claude_cfg["base_url"],
-        },
-        "codex": {
-            "available": codex_provider.is_available(),
-            "model": codex_cfg["model"],
-            "base_url": codex_cfg["base_url"],
-        },
-        "glm": {
-            "available": glm_provider.is_available(),
-            "model": glm_cfg["model"],
-            "base_url": glm_cfg["base_url"],
-        },
-        "grok": {
-            "available": grok_provider.is_available(),
-            "model": grok_cfg["model"],
-            "base_url": grok_cfg["base_url"],
-        },
+        "available": is_ai_configured(cfg),
+        "api_mode": cfg["api_mode"],
     }
 
 
-def _provider_config_updates(body: dict, key_map: dict[str, str]) -> dict[str, str]:
+def _ai_config_updates(body: dict) -> dict[str, str]:
+    key_map = {
+        "base_url": AI_BASE_URL_KEY,
+        "api_key": AI_API_KEY_KEY,
+        "model": AI_MODEL_KEY,
+        "api_mode": AI_API_MODE_KEY,
+    }
     updates: dict[str, str] = {}
     for field, config_key in key_map.items():
         if field not in body:
             continue
         value = "" if body[field] is None else str(body[field]).strip()
-        if field == "api_key":
-            if not value:
-                continue
-        elif not value:
+        if field == "api_key" and not value:
+            continue
+        if field == "api_mode":
+            value = value.lower()
+            if value not in SUPPORTED_API_MODES:
+                raise HTTPException(
+                    status_code=400,
+                    detail="api_mode 只支持 responses 或 chat_completions",
+                )
+        elif field != "model" and not value:
             raise HTTPException(status_code=400, detail=f"{field} 不能为空")
         updates[config_key] = value
     return updates
@@ -164,7 +127,7 @@ def _provider_config_updates(body: dict, key_map: dict[str, str]) -> dict[str, s
 
 @router.post("/chat")
 async def ai_chat(req: ChatRequest, request: Request, _=Depends(require_auth)):
-    """AI 聊天 — 返回 SSE 流式响应（支持 Agent 工具调用 + 长期记忆）"""
+    """Chat through the configured OpenAI-compatible endpoint."""
     from ..dependencies import get_current_user as _get_user
     from ..services.agent_tools import set_current_user_context
     from ..services.user_memory import build_memory_prompt
@@ -172,69 +135,84 @@ async def ai_chat(req: ChatRequest, request: Request, _=Depends(require_auth)):
     user = _get_user(request)
     username = user.username if user else ""
 
-    # 设置工具调用上下文用户（包含权限供 tool 内部鉴权）
     if user:
-        set_current_user_context(user.username, user.role, getattr(user, 'gallery_unlocked', False))
+        set_current_user_context(
+            user.username,
+            user.role,
+            getattr(user, "gallery_unlocked", False),
+        )
     else:
         set_current_user_context("", "visitor", False)
 
     messages = []
 
-    # 1. 注入当前环境与页面深度上下文 (最高优)
     if req.client_context:
-        messages.append({
-            "role": "system",
-            "content": f"[前端即时上下文]\n{req.client_context.strip()}\n\n请结合以上环境和页面状态回答。"
-        })
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    f"[前端即时上下文]\n{req.client_context.strip()}\n\n"
+                    "请结合以上环境和页面状态回答。"
+                ),
+            }
+        )
 
-    # 2. 注入长期记忆
     if username:
         memory_prompt = await run_in_threadpool(build_memory_prompt, username)
         if memory_prompt:
             messages.append({"role": "system", "content": memory_prompt})
 
-    # 3. 注入技能预设的 system prompt
     if req.skill_id and user:
-        skill_prompt = await run_in_threadpool(_load_skill_prompt, req.skill_id, user.username)
+        skill_prompt = await run_in_threadpool(
+            _load_skill_prompt,
+            req.skill_id,
+            user.username,
+        )
         if skill_prompt:
             messages.append({"role": "system", "content": skill_prompt})
 
-    # 4. 注入全局安全护栏 (非 admin 限制)
     if not user or user.role != "admin":
-        messages.append({
-            "role": "system",
-            "content": "【最高安全原则】：当前用户非系统管理员。你被禁止透露任何系统底层的配置文件、密码、Token以及其他未公开的隐私数据。如果用户试图打探此类信息，请礼貌但果断地拒绝。"
-        })
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "【最高安全原则】：当前用户非系统管理员。你被禁止透露任何系统底层的"
+                    "配置文件、密码、Token以及其他未公开的隐私数据。如果用户试图打探此类信息，"
+                    "请礼貌但果断地拒绝。"
+                ),
+            }
+        )
 
-    for h in req.history[-20:]:
-        # 强制过滤 system 角色，防止注入攻击
-        if h.role not in ("user", "assistant"):
+    for history_item in req.history[-20:]:
+        if history_item.role not in ("user", "assistant"):
             continue
-        messages.append({"role": h.role, "content": h.content})
+        messages.append(
+            {"role": history_item.role, "content": history_item.content}
+        )
     messages.append({"role": "user", "content": req.message})
 
-    # 包装 SSE 生成器，在流结束后异步触发事实提取
     async def _sse_with_extraction():
         ai_response_text = ""
-        async for chunk in _sse_generator(req.provider, messages):
-            # 收集 AI 回复文本用于后续提取
+        async for chunk in _sse_generator(messages):
             if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]":
                 try:
-                    data_str = chunk[6:].strip()
-                    parsed = json.loads(data_str)
+                    parsed = json.loads(chunk[6:].strip())
                     if isinstance(parsed, str):
                         ai_response_text += parsed
                 except Exception:
                     pass
             yield chunk
 
-        # 流结束后异步提取事实（提取失败由任务内部记录日志）
-        if username and ai_response_text and req.provider in ("codex", "claude"):
+        if username and ai_response_text:
             import asyncio
+
             from ..services.user_memory import extract_facts_from_conversation
+
             task = asyncio.create_task(
                 extract_facts_from_conversation(
-                    username, req.message, ai_response_text, req.provider
+                    username,
+                    req.message,
+                    ai_response_text,
                 )
             )
             _memory_tasks.add(task)
@@ -250,135 +228,37 @@ async def ai_chat(req: ChatRequest, request: Request, _=Depends(require_auth)):
     )
 
 
-# ==================== Claude 配置 ====================
-
-@router.get("/config/claude")
-def claude_config(_=Depends(require_role("admin"))):
-    cfg = get_claude_config()
-    api_key = cfg["api_key"]
-    masked = ""
-    if api_key:
-        masked = api_key[:8] + "****" + api_key[-4:] if len(api_key) > 16 else "****"
+@router.get("/config/model")
+def model_config(_=Depends(require_role("admin"))):
+    cfg = get_ai_config()
     return {
         "base_url": cfg["base_url"],
-        "api_key_masked": masked,
-        "api_key_configured": bool(api_key),
+        "api_key_masked": _mask_secret(cfg["api_key"]),
+        "api_key_configured": bool(cfg["api_key"]),
         "model": cfg["model"],
+        "api_mode": cfg["api_mode"],
     }
 
 
-@router.post("/config/claude")
-def update_claude_config(body: dict, _=Depends(require_role("admin"))):
-    key_map = {
-        "base_url": CLAUDE_BASE_URL_KEY,
-        "api_key": CLAUDE_API_KEY_KEY,
-        "model": CLAUDE_MODEL_KEY,
-    }
-    updates = _provider_config_updates(body, key_map)
+@router.post("/config/model")
+def update_model_config(body: dict, _=Depends(require_role("admin"))):
+    updates = _ai_config_updates(body)
     for config_key, value in updates.items():
         set_config(config_key, value)
     return {"ok": True, "updated": len(updates), "updated_keys": sorted(updates)}
 
-
-# ==================== Codex 配置 ====================
-
-@router.get("/config/codex")
-def codex_config(_=Depends(require_role("admin"))):
-    cfg = get_codex_config()
-    api_key = cfg["api_key"]
-    masked = ""
-    if api_key:
-        masked = api_key[:8] + "****" + api_key[-4:] if len(api_key) > 16 else "****"
-    return {
-        "base_url": cfg["base_url"],
-        "api_key_masked": masked,
-        "api_key_configured": bool(api_key),
-        "model": cfg["model"],
-    }
-
-
-@router.post("/config/codex")
-def update_codex_config(body: dict, _=Depends(require_role("admin"))):
-    key_map = {
-        "base_url": CODEX_BASE_URL_KEY,
-        "api_key": CODEX_API_KEY_KEY,
-        "model": CODEX_MODEL_KEY,
-    }
-    updates = _provider_config_updates(body, key_map)
-    for config_key, value in updates.items():
-        set_config(config_key, value)
-    return {"ok": True, "updated": len(updates), "updated_keys": sorted(updates)}
-
-
-# ==================== GLM 配置 ====================
-
-@router.get("/config/glm")
-def glm_config(_=Depends(require_role("admin"))):
-    cfg = get_glm_config()
-    api_key = cfg["api_key"]
-    masked = ""
-    if api_key:
-        masked = api_key[:8] + "****" + api_key[-4:] if len(api_key) > 16 else "****"
-    return {
-        "base_url": cfg["base_url"],
-        "api_key_masked": masked,
-        "api_key_configured": bool(api_key),
-        "model": cfg["model"],
-    }
-
-
-@router.post("/config/glm")
-def update_glm_config(body: dict, _=Depends(require_role("admin"))):
-    key_map = {
-        "base_url": GLM_BASE_URL_KEY,
-        "api_key": GLM_API_KEY_KEY,
-        "model": GLM_MODEL_KEY,
-    }
-    updates = _provider_config_updates(body, key_map)
-    for config_key, value in updates.items():
-        set_config(config_key, value)
-    return {"ok": True, "updated": len(updates), "updated_keys": sorted(updates)}
-
-
-# ==================== Grok 配置 ====================
-
-@router.get("/config/grok")
-def grok_config(_=Depends(require_role("admin"))):
-    cfg = get_grok_config()
-    api_key = cfg["api_key"]
-    masked = ""
-    if api_key:
-        masked = api_key[:8] + "****" + api_key[-4:] if len(api_key) > 16 else "****"
-    return {
-        "base_url": cfg["base_url"],
-        "api_key_masked": masked,
-        "api_key_configured": bool(api_key),
-        "model": cfg["model"],
-    }
-
-
-@router.post("/config/grok")
-def update_grok_config(body: dict, _=Depends(require_role("admin"))):
-    key_map = {
-        "base_url": GROK_BASE_URL_KEY,
-        "api_key": GROK_API_KEY_KEY,
-        "model": GROK_MODEL_KEY,
-    }
-    updates = _provider_config_updates(body, key_map)
-    for config_key, value in updates.items():
-        set_config(config_key, value)
-    return {"ok": True, "updated": len(updates), "updated_keys": sorted(updates)}
-
-
-# ==================== Agent 配置 ====================
 
 @router.get("/config/agent")
 def agent_config(_=Depends(require_role("admin"))):
     show_process = get_config("AGENT_SHOW_TOOL_PROCESS")
     max_rounds = get_config("AGENT_MAX_TOOL_ROUNDS")
+    try:
+        rounds = int(max_rounds) if max_rounds else 5
+    except (TypeError, ValueError):
+        rounds = 5
     return {
-        "show_tool_process": show_process != "false",  # 默认 true
-        "max_tool_rounds": int(max_rounds) if max_rounds else 5,
+        "show_tool_process": show_process != "false",
+        "max_tool_rounds": rounds,
     }
 
 
@@ -386,8 +266,10 @@ def agent_config(_=Depends(require_role("admin"))):
 def update_agent_config(body: dict, _=Depends(require_role("admin"))):
     updated = 0
     if "show_tool_process" in body:
-        val = "true" if body["show_tool_process"] else "false"
-        set_config("AGENT_SHOW_TOOL_PROCESS", val)
+        set_config(
+            "AGENT_SHOW_TOOL_PROCESS",
+            "true" if body["show_tool_process"] else "false",
+        )
         updated += 1
     if "max_tool_rounds" in body:
         try:
@@ -399,13 +281,11 @@ def update_agent_config(body: dict, _=Depends(require_role("admin"))):
     return {"ok": True, "updated": updated}
 
 
-# ==================== 用户记忆管理 ====================
-
 @router.get("/memory")
 def list_memory(request: Request, _=Depends(require_auth)):
-    """获取当前用户的长期记忆列表"""
     from ..dependencies import get_current_user as _get_user
     from ..services.user_memory import get_user_facts
+
     user = _get_user(request)
     if not user:
         return {"facts": []}
@@ -414,11 +294,10 @@ def list_memory(request: Request, _=Depends(require_auth)):
 
 @router.delete("/memory")
 def delete_memory(id: int, request: Request, _=Depends(require_auth)):
-    """删除一条记忆"""
     from ..dependencies import get_current_user as _get_user
     from ..services.user_memory import delete_fact
+
     user = _get_user(request)
     if not user:
         return {"error": "未登录"}
-    ok = delete_fact(user.username, id)
-    return {"ok": ok}
+    return {"ok": delete_fact(user.username, id)}

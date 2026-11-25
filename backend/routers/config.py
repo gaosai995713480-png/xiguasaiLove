@@ -21,13 +21,41 @@ _LEGACY_COOKIE_KEYS = {
     "METING_KUWO_COOKIE",
 }
 
+# 已下线的多供应商大模型配置：不再展示或消费，但保留数据库原值，避免启动时破坏历史配置。
+_LEGACY_AI_CONFIG_KEYS = {
+    "AI_PROVIDER",
+    "AI_MODEL",
+    "AI_BASE_URL",
+    "AI_API_KEY",
+    "CLAUDE_BASE_URL",
+    "CLAUDE_API_KEY",
+    "CLAUDE_MODEL",
+    "CODEX_BASE_URL",
+    "CODEX_API_KEY",
+    "CODEX_MODEL",
+    "GLM_BASE_URL",
+    "GLM_API_KEY",
+    "GLM_MODEL",
+    "GROK_BASE_URL",
+    "GROK_API_KEY",
+    "GROK_MODEL",
+    "TRIPSTAR_LLM_MODEL_ID",
+    "TRIPSTAR_LLM_API_KEY",
+    "TRIPSTAR_LLM_BASE_URL",
+    "TRIPSTAR_LLM_TIMEOUT",
+    "DEEPSEEK_BASE_URL",
+    "DEEPSEEK_API_KEY",
+    "DEEPSEEK_MODEL",
+    "DEEPSEEK_TIMEOUT",
+}
+
 _CONFIG_LABELS = {
     "TRIPSTAR_ENABLED": "TripStar 功能开关",
     "TRIPSTAR_MOCK_MODE": "TripStar Mock 模式",
-    "TRIPSTAR_LLM_MODEL_ID": "TripStar 大模型名称",
-    "TRIPSTAR_LLM_API_KEY": "TripStar 大模型 API Key",
-    "TRIPSTAR_LLM_BASE_URL": "TripStar 大模型 Base URL",
-    "TRIPSTAR_LLM_TIMEOUT": "TripStar 大模型超时秒数",
+    "AI_CHAT_BASE_URL": "AI 请求地址",
+    "AI_CHAT_API_KEY": "AI API Key",
+    "AI_CHAT_MODEL": "AI 模型（可选）",
+    "AI_CHAT_API_MODE": "AI 接口类型",
     "AMAP_KEY": "高德天气 Web 服务 Key",
     "TRIPSTAR_AMAP_WEB_KEY": "TripStar 高德 Web 服务 Key",
     "TRIPSTAR_ENABLE_XHS": "TripStar 小红书开关",
@@ -37,8 +65,6 @@ _CONFIG_LABELS = {
     "VITE_TRIPSTAR_AMAP_WEB_JS_KEY": "TripStar 高德 JS API Key",
     "VITE_TRIPSTAR_AMAP_SECURITY_JS_CODE": "TripStar 高德安全密钥",
     "INVITE_CODE": "注册邀请码",
-    "CLAUDE_API_KEY": "Claude API Key",
-    "CLAUDE_BASE_URL": "Claude Base URL",
     "OSS_ACCESS_KEY_ID": "OSS Access Key ID",
     "OSS_ACCESS_KEY_SECRET": "OSS Access Key Secret",
 }
@@ -78,7 +104,7 @@ def list_config_keys(_=Depends(require_role("admin"))):
     configs = get_all_configs()
     items = []
     for key, value in configs.items():
-        if key in _LEGACY_COOKIE_KEYS:
+        if key in _LEGACY_COOKIE_KEYS or key in _LEGACY_AI_CONFIG_KEYS:
             continue
         is_secret = any(hint in key for hint in _SECRET_HINTS)
         items.append({

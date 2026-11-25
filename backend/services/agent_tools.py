@@ -57,8 +57,8 @@ def get_all_tools() -> list[dict]:
     ]
 
 
-def get_tools_for_openai() -> list[dict]:
-    """转换为 OpenAI function calling 格式"""
+def get_tools_for_chat_completions() -> list[dict]:
+    """转换为 Chat Completions function calling 格式"""
     return [
         {
             "type": "function",
@@ -72,13 +72,14 @@ def get_tools_for_openai() -> list[dict]:
     ]
 
 
-def get_tools_for_anthropic() -> list[dict]:
-    """转换为 Anthropic tool_use 格式"""
+def get_tools_for_responses() -> list[dict]:
+    """转换为 Responses API 顶层 function tool 格式"""
     return [
         {
+            "type": "function",
             "name": t["name"],
             "description": t["description"],
-            "input_schema": t["parameters"],
+            "parameters": t["parameters"],
         }
         for t in _tool_registry.values()
     ]

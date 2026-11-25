@@ -408,6 +408,18 @@ def test_fresh_database_initial_credentials_are_generated(monkeypatch, tmp_path)
         for sql, params in inserts
         if sql.startswith("INSERT INTO love_config") and params[0] == "INVITE_CODE"
     )
+    ai_chat_base_insert = next(
+        params
+        for sql, params in inserts
+        if sql.startswith("INSERT INTO love_config")
+        and params[0] == "AI_CHAT_BASE_URL"
+    )
+    ai_chat_mode_insert = next(
+        params
+        for sql, params in inserts
+        if sql.startswith("INSERT INTO love_config")
+        and params[0] == "AI_CHAT_API_MODE"
+    )
 
     assert admin_insert[0] == "admin"
     assert admin_insert[1] != database._LEGACY_DEFAULT_ADMIN_PASSWORD
@@ -415,6 +427,8 @@ def test_fresh_database_initial_credentials_are_generated(monkeypatch, tmp_path)
     assert gallery_insert[1] != database._LEGACY_DEFAULT_GALLERY_PASSWORD
     assert invite_insert[0] == "INVITE_CODE"
     assert invite_insert[1] != database._LEGACY_DEFAULT_INVITE_CODE
+    assert ai_chat_base_insert == ("AI_CHAT_BASE_URL", "")
+    assert ai_chat_mode_insert == ("AI_CHAT_API_MODE", "")
 
 
 class ExistingCredentialCursor:
@@ -462,7 +476,22 @@ def test_existing_legacy_credentials_are_never_rewritten_on_startup(monkeypatch,
 
     database.init_tables()
 
-    assert not any(sql.startswith("UPDATE") for sql, _ in cursor.executed)
+    protected_tables = (
+        settings.users_table,
+        settings.page_password_table,
+        "love_config",
+    )
+    credential_updates = [
+        sql
+        for sql, _ in cursor.executed
+        if sql.startswith("UPDATE")
+        and any(f"`{table}`" in sql or f" {table} " in sql for table in protected_tables)
+    ]
+    assert credential_updates == []
+    assert any(
+        sql.startswith("UPDATE ai_conversations SET provider = 'ai'")
+        for sql, _ in cursor.executed
+    )
     assert not (tmp_path / "tmp" / "initial_credentials.txt").exists()
 
 

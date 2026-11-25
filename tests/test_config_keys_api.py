@@ -98,3 +98,48 @@ def test_tripstar_map_config_reads_frontend_keys_from_love_config_without_leakin
     assert payload["amap_web_js_key"] == "real-js-key"
     assert payload["amap_security_js_code"] == "real-security-code"
     assert "backend-web-key" not in str(payload)
+
+
+def test_shared_ai_config_labels_are_generic():
+    labels = config_router._CONFIG_LABELS
+
+    assert labels["AI_CHAT_API_KEY"] == "AI API Key"
+    assert labels["AI_CHAT_BASE_URL"] == "AI 请求地址"
+    assert labels["AI_CHAT_MODEL"] == "AI 模型（可选）"
+    assert labels["AI_CHAT_API_MODE"] == "AI 接口类型"
+    assert not any(key.startswith("DEEPSEEK_") for key in labels)
+    assert not any(key.startswith("TRIPSTAR_LLM_") for key in labels)
+    assert not any(key.startswith("CLAUDE_") for key in labels)
+
+
+def test_config_key_list_hides_legacy_ai_provider_keys(isolated_config_store):
+    isolated_config_store.update(
+        {
+            "AI_CHAT_BASE_URL": "https://proxy.example.com/v1",
+            "AI_CHAT_API_KEY": "configured-key",
+            "AI_CHAT_MODEL": "gpt-5.4-codex",
+            "AI_CHAT_API_MODE": "responses",
+            "DEEPSEEK_BASE_URL": "https://legacy.deepseek.example",
+            "DEEPSEEK_API_KEY": "legacy-key",
+            "DEEPSEEK_MODEL": "legacy-model-config",
+            "DEEPSEEK_TIMEOUT": "120",
+            "CLAUDE_API_KEY": "legacy-secret",
+            "CODEX_MODEL": "legacy-model",
+            "TRIPSTAR_LLM_BASE_URL": "https://legacy.example",
+            "AI_PROVIDER": "glm",
+        }
+    )
+    admin_client = _client_with_role("admin")
+
+    response = admin_client.get("/api/config/keys")
+
+    assert response.status_code == 200
+    keys = {item["key"] for item in response.json()["items"]}
+    assert {
+        "AI_CHAT_BASE_URL",
+        "AI_CHAT_API_KEY",
+        "AI_CHAT_MODEL",
+        "AI_CHAT_API_MODE",
+    } <= keys
+    assert not any(key.startswith("DEEPSEEK_") for key in keys)
+    assert keys.isdisjoint(config_router._LEGACY_AI_CONFIG_KEYS)

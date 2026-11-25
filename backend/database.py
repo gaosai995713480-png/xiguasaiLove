@@ -297,7 +297,7 @@ def init_tables():
                 CREATE TABLE IF NOT EXISTS `ai_conversations` (
                     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '会话ID',
                     username VARCHAR(50) NOT NULL COMMENT '所属用户名',
-                    provider VARCHAR(20) NOT NULL COMMENT '供应商: codex/claude/glm/grok',
+                    provider VARCHAR(20) NOT NULL DEFAULT 'ai' COMMENT '内部会话类型: ai',
                     title VARCHAR(100) NOT NULL DEFAULT '新对话' COMMENT '会话标题',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后活跃',
@@ -556,22 +556,32 @@ def init_tables():
                         "检测到历史固定管理员密码；为避免覆盖用户配置，未自动修改，请登录后立即手动更换"
                     )
 
+        # Unified AI migration: keep historical conversations accessible
+        # without deleting messages.
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE ai_conversations SET provider = 'ai' "
+                "WHERE provider IN (%s, %s, %s, %s, %s)",
+                ("claude", "codex", "glm", "grok", "deepseek"),
+            )
+            migrated_count = getattr(cursor, "rowcount", 0)
+            if migrated_count:
+                logger.info("已将 %d 个历史 AI 会话迁移到统一 AI", migrated_count)
+
         # 确保默认邀请码及 OSS 配置项
         default_configs = [
             ("OSS_ENDPOINT", ""),
             ("OSS_BUCKET_NAME", ""),
             ("OSS_ACCESS_KEY_ID", ""),
             ("OSS_ACCESS_KEY_SECRET", ""),
-            ("CLAUDE_BASE_URL", ""),
-            ("CLAUDE_API_KEY", ""),
+            ("AI_CHAT_BASE_URL", ""),
+            ("AI_CHAT_API_KEY", ""),
+            ("AI_CHAT_MODEL", ""),
+            ("AI_CHAT_API_MODE", ""),
             ("AGENT_SHOW_TOOL_PROCESS", "true"),
             ("AGENT_MAX_TOOL_ROUNDS", "5"),
             ("TRIPSTAR_ENABLED", "true"),
             ("TRIPSTAR_MOCK_MODE", "true"),
-            ("TRIPSTAR_LLM_MODEL_ID", ""),
-            ("TRIPSTAR_LLM_API_KEY", ""),
-            ("TRIPSTAR_LLM_BASE_URL", ""),
-            ("TRIPSTAR_LLM_TIMEOUT", "600"),
             ("AMAP_KEY", ""),
             ("TRIPSTAR_AMAP_WEB_KEY", ""),
             ("TRIPSTAR_ENABLE_XHS", "false"),

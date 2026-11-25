@@ -13,7 +13,7 @@ function backHome() {
 <template>
   <TopBar
     title="AI 助手"
-    subtitle="对话、技能、记忆与多模型切换"
+    subtitle="对话、技能与长期记忆"
     @back="backHome"
   />
 

@@ -8,12 +8,12 @@
 """
 import json
 import logging
-from typing import Optional
 
 from starlette.concurrency import run_in_threadpool
 
-from ..database import get_db, get_config
-from .ai_chat import build_anthropic_messages_url, build_openai_chat_url
+from ..database import get_db
+from .ai_chat import get_ai_config, is_ai_configured
+from .llm_urls import build_llm_api_url
 
 logger = logging.getLogger(__name__)
 
@@ -106,14 +106,12 @@ async def extract_facts_from_conversation(
     username: str,
     user_message: str,
     ai_response: str,
-    provider_name: str = "codex",
 ) -> list[str]:
     """
     对话结束后，异步调用 LLM 从对话中提取用户事实。
     使用轻量级提示，不走 Agent Loop。
     """
     import httpx
-    from ..services.ai_chat import get_codex_config, get_claude_config
 
     extraction_prompt = f"""请从以下对话中提取关于用户的关键个人事实信息。
 
@@ -133,51 +131,41 @@ AI: {ai_response[:500]}
 只返回 JSON，不要其他文字。"""
 
     try:
-        if provider_name == "claude":
-            cfg = get_claude_config()
-            if not cfg["api_key"]:
-                return []
-            url = build_anthropic_messages_url(cfg["base_url"])
-            headers = {
-                "x-api-key": cfg["api_key"],
-                "anthropic-version": "2023-06-01",
-                "Content-Type": "application/json",
-            }
+        cfg = get_ai_config()
+        if not is_ai_configured(cfg):
+            return []
+        url = build_llm_api_url(cfg["base_url"], cfg["api_mode"])
+        headers = {
+            "Authorization": f"Bearer {cfg['api_key']}",
+            "Content-Type": "application/json",
+        }
+        if cfg["api_mode"] == "responses":
             body = {
-                "model": cfg["model"],
-                "max_tokens": 500,
-                "messages": [{"role": "user", "content": extraction_prompt}],
+                "input": [{"role": "user", "content": extraction_prompt}],
             }
-            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-                resp = await client.post(url, headers=headers, json=body)
-                if resp.status_code != 200:
-                    return []
-                data = resp.json()
-                text = ""
-                for block in data.get("content", []):
-                    if block.get("type") == "text":
-                        text += block.get("text", "")
         else:
-            # 默认用 Codex (OpenAI)
-            cfg = get_codex_config()
-            if not cfg["api_key"]:
-                return []
-            url = build_openai_chat_url(cfg["base_url"])
-            headers = {
-                "Authorization": f"Bearer {cfg['api_key']}",
-                "Content-Type": "application/json",
-            }
             body = {
-                "model": cfg["model"],
                 "max_tokens": 500,
                 "messages": [{"role": "user", "content": extraction_prompt}],
             }
-            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-                resp = await client.post(url, headers=headers, json=body)
-                if resp.status_code != 200:
-                    return []
+        if cfg["model"]:
+            body["model"] = cfg["model"]
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            resp = await client.post(url, headers=headers, json=body)
+            if resp.status_code != 200:
+                return []
+            content_type = (resp.headers.get("content-type") or "").lower()
+            if "text/event-stream" in content_type:
+                if cfg["api_mode"] == "responses":
+                    text = _extract_responses_event_stream_text(resp.text)
+                else:
+                    text = _extract_chat_event_stream_text(resp.text)
+            else:
                 data = resp.json()
-                text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if cfg["api_mode"] == "responses":
+                    text = _extract_responses_text(data)
+                else:
+                    text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
         # 解析 JSON
         text = text.strip()
@@ -206,3 +194,68 @@ AI: {ai_response[:500]}
     except Exception as e:
         logger.warning("事实提取失败: %s", e)
         return []
+
+
+def _extract_responses_text(data: dict) -> str:
+    direct = data.get("output_text")
+    if direct:
+        return str(direct)
+    parts = []
+    for item in data.get("output") or []:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for part in item.get("content") or []:
+            if isinstance(part, dict) and part.get("type") in {"output_text", "text"}:
+                if part.get("text"):
+                    parts.append(str(part["text"]))
+    return "".join(parts)
+
+
+def _extract_responses_event_stream_text(text: str) -> str:
+    deltas = []
+    fallback = ""
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line.split(":", 1)[1].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            event = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        event_type = event.get("type", "")
+        if event_type == "response.output_text.delta":
+            deltas.append(str(event.get("delta") or ""))
+        elif event_type == "response.output_text.done":
+            fallback = str(event.get("text") or "")
+        elif event_type == "response.output_item.done":
+            fallback = _extract_responses_text({"output": [event.get("item")]})
+        elif event_type == "response.completed":
+            fallback = _extract_responses_text(event.get("response") or {})
+    return "".join(deltas).strip() or fallback
+
+
+def _extract_chat_event_stream_text(text: str) -> str:
+    chunks = []
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line.split(":", 1)[1].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            event = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        for choice in event.get("choices") or []:
+            content = (choice.get("delta") or {}).get("content")
+            if content:
+                chunks.append(str(content))
+    return "".join(chunks)

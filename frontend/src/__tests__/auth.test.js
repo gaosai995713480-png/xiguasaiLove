@@ -52,7 +52,8 @@ describe('useAuthStore', () => {
       musicStore.isPlaying = true
       musicStore.currentIndex = 2
 
-      localStorage.setItem('ai_chat_codex_admin', '[]')
+      localStorage.setItem('ai_chat_history_admin', '[]')
+      localStorage.setItem('ai_active_skill_admin', '{}')
       localStorage.setItem('ai_active_skills_admin', '{}')
       localStorage.setItem('express_history', '[]')
       sessionStorage.setItem('gallery_unlocked', '1')
@@ -68,7 +69,8 @@ describe('useAuthStore', () => {
       expect(authStore.username).toBe('')
       expect(authStore.role).toBe('')
       expect(musicStore.isPlaying).toBe(false)
-      expect(localStorage.getItem('ai_chat_codex_admin')).toBeNull()
+      expect(localStorage.getItem('ai_chat_history_admin')).toBeNull()
+      expect(localStorage.getItem('ai_active_skill_admin')).toBeNull()
       expect(localStorage.getItem('ai_active_skills_admin')).toBeNull()
       expect(localStorage.getItem('express_history')).toBeNull()
       expect(sessionStorage.getItem('gallery_unlocked')).toBeNull()

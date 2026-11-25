@@ -15,7 +15,6 @@ router = APIRouter(prefix="/api/ai/conversations", tags=["ai-conversations"])
 # ==================== 请求/响应模型 ====================
 
 class ConversationCreate(BaseModel):
-    provider: str = Field(..., pattern="^(claude|codex|glm|grok)$")
     title: str = Field(default="新对话", max_length=100)
 
 
@@ -33,20 +32,19 @@ class MessageSave(BaseModel):
 @router.get("")
 def list_conversations(
     request: Request,
-    provider: str = Query(..., pattern="^(claude|codex|glm|grok)$"),
     _=Depends(require_auth),
 ):
-    """获取某供应商的会话列表（按更新时间倒序）"""
+    """获取当前用户的会话列表（按更新时间倒序）"""
     user = get_current_user(request)
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT id, title, created_at, updated_at
                    FROM ai_conversations
-                   WHERE username = %s AND provider = %s
+                   WHERE username = %s
                    ORDER BY updated_at DESC
                    LIMIT 50""",
-                (user.username, provider),
+                (user.username,),
             )
             rows = cur.fetchall()
     return [
@@ -63,11 +61,11 @@ def create_conversation(body: ConversationCreate, request: Request, _=Depends(re
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO ai_conversations (username, provider, title) VALUES (%s, %s, %s)",
-                (user.username, body.provider, body.title),
+                (user.username, "ai", body.title),
             )
             conn.commit()
             conv_id = cur.lastrowid
-    return {"id": conv_id, "title": body.title, "provider": body.provider}
+    return {"id": conv_id, "title": body.title}
 
 
 @router.get("/{conv_id}/messages")
@@ -171,7 +169,6 @@ def save_messages(
 def search_conversations(
     request: Request,
     q: str = Query(..., min_length=1, max_length=100),
-    provider: str = Query(..., pattern="^(claude|codex|glm|grok)$"),
     _=Depends(require_auth),
 ):
     """搜索消息内容，返回匹配的会话"""
@@ -182,11 +179,11 @@ def search_conversations(
                 """SELECT DISTINCT c.id, c.title, c.updated_at
                    FROM ai_conversations c
                    JOIN ai_messages m ON m.conversation_id = c.id
-                   WHERE c.username = %s AND c.provider = %s
+                   WHERE c.username = %s
                      AND m.content LIKE %s
                    ORDER BY c.updated_at DESC
                    LIMIT 20""",
-                (user.username, provider, f"%{q}%"),
+                (user.username, f"%{q}%"),
             )
             rows = cur.fetchall()
     return [

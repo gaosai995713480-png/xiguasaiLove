@@ -12,9 +12,9 @@
 - 🎵 **音乐 / 点歌台**：Meting 网易云音乐接入，在线点歌
 - 📦 **快递查询**：快递100 接口，包裹跟踪
 - 🌤️ **天气**：实时天气信息
-- 🤖 **AI 助手（独立页面）**：AI 对话、技能调用、长期记忆（用户记忆服务），从「更多 → AI 助手」进入
+- 🤖 **AI 助手（独立页面）**：OpenAI 兼容接口对话、技能调用、长期记忆（用户记忆服务），从「更多 → AI 助手」进入
 - 🍳 **菜谱**：集成 HowToCook 做菜食谱
-- ✈️ **TripStar**：小红书旅行推荐搜索与行程规划
+- ✈️ **TripStar**：小红书旅行推荐搜索与 AI 行程规划
 - 🔐 **账号与安全**：管理员/访客登录、邀请码注册、会话撤销、自助改密
 - 🖼️ **私密画廊**：独立画廊密码、管理员轮换密码、会话级解锁
 - 💾 **回忆导出**：导出时间轴、心情、愿望、胶囊、足迹、相册和做饭记录
@@ -116,11 +116,11 @@ python tools/reset_password.py --gallery
   - `CORS_ORIGINS`、`COOKIE_SECURE`、`SESSION_TTL_SECONDS`
   - 首启凭据 `INITIAL_*`
   - 后端高德 Web 服务 Key `AMAP_KEY`
-  - TripStar 的环境变量兜底
+  - AI 接口 / TripStar 的环境变量兜底
 - `love_config` 数据库配置（通过「用户管理 → 系统配置」维护）：
-  - OSS、快递100、AI Provider、音乐 Cookie
+  - OSS、快递100、AI 接口、音乐 Cookie
   - 高德前端 JS Key 与安全密钥
-  - TripStar 模型、小红书等运行配置
+  - TripStar 的小红书等运行配置
 
 数据库配置优先于大部分运行期环境变量；已有值不会被启动流程自动覆盖。
 
@@ -136,9 +136,16 @@ python tools/reset_password.py --gallery
 - 高德地图 Key（后端 `AMAP_KEY`；TripStar 可用 `TRIPSTAR_AMAP_WEB_KEY`）
 - 高德前端地图（`VITE_TRIPSTAR_AMAP_WEB_JS_KEY` / `VITE_TRIPSTAR_AMAP_SECURITY_JS_CODE`）
 - 首次建库凭据（`INITIAL_*`）与会话/CORS 配置（`COOKIE_SECURE`、`CORS_ORIGINS`）
+- AI 接口环境兜底（`AI_CHAT_BASE_URL` / `AI_CHAT_API_KEY` / `AI_CHAT_MODEL` / `AI_CHAT_API_MODE`）
 
-OSS、快递100、AI Provider、音乐 Cookie 和部分 TripStar 配置主要保存在
-`love_config` 数据库表中，通过管理页维护，不保证读取同名环境变量。
+OSS、快递100、AI 接口、音乐 Cookie 和部分 TripStar 配置主要保存在
+`love_config` 数据库表中，通过管理页维护；其中 AI 接口支持同名环境变量兜底，
+其余配置不保证读取同名环境变量。
+
+AI 助手与 TripStar 共用一个 OpenAI 兼容接口。管理页配置请求地址、API Key、
+可选模型和接口类型（`responses` 默认，或 `chat_completions`）：运行期优先读取
+`AI_CHAT_*` 对应的数据库配置，数据库值为空时才使用同名环境变量兜底。
+模型留空时请求不发送 `model` 字段。
 
 > ⚠️ 请勿将 `.env` 提交到仓库（已在 `.gitignore` 中排除）
 

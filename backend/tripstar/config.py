@@ -7,6 +7,7 @@ from pathlib import Path
 
 from backend.config import settings as app_settings
 from backend.database import get_config
+from backend.services.llm_urls import DEFAULT_API_MODE, normalize_api_mode
 
 
 def _db_config(name: str) -> str:
@@ -17,22 +18,14 @@ def _db_config(name: str) -> str:
 
 
 def _config_value(name: str, *env_names: str, default: str = "") -> str:
-    db_value = _db_config(name)
-    if db_value != "":
+    db_value = (_db_config(name) or "").strip()
+    if db_value:
         return db_value
     for env_name in (name, *env_names):
-        value = os.getenv(env_name)
-        if value is not None and value != "":
+        value = (os.getenv(env_name) or "").strip()
+        if value:
             return value
     return default
-
-
-def _config_int(name: str, *env_names: str, default: int) -> int:
-    raw = _config_value(name, *env_names, default=str(default))
-    try:
-        return max(1, int(raw))
-    except (TypeError, ValueError):
-        return default
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -51,20 +44,22 @@ class TripStarSettings:
     enabled: bool = field(default_factory=lambda: _env_bool("TRIPSTAR_ENABLED", True))
     mock_mode: bool = field(default_factory=lambda: _env_bool("TRIPSTAR_MOCK_MODE", False))
 
-    llm_model_id: str = field(
-        default_factory=lambda: _config_value("TRIPSTAR_LLM_MODEL_ID", "LLM_MODEL_ID")
-    )
-    llm_api_key: str = field(
-        default_factory=lambda: _config_value("TRIPSTAR_LLM_API_KEY", "LLM_API_KEY")
-    )
-    llm_base_url: str = field(
-        default_factory=lambda: _config_value("TRIPSTAR_LLM_BASE_URL", "LLM_BASE_URL")
-    )
-    llm_timeout: int = field(
-        default_factory=lambda: _config_int(
-            "TRIPSTAR_LLM_TIMEOUT", "LLM_TIMEOUT", default=600
+    # AI 助手与 TripStar 共用单一 OpenAI 兼容接口配置。
+    llm_api_mode: str = field(
+        default_factory=lambda: normalize_api_mode(
+            _config_value("AI_CHAT_API_MODE", default=DEFAULT_API_MODE)
         )
     )
+    llm_model_id: str = field(
+        default_factory=lambda: _config_value("AI_CHAT_MODEL").strip()
+    )
+    llm_api_key: str = field(
+        default_factory=lambda: _config_value("AI_CHAT_API_KEY").strip()
+    )
+    llm_base_url: str = field(
+        default_factory=lambda: _config_value("AI_CHAT_BASE_URL").strip()
+    )
+    llm_timeout: int = 600
 
     amap_web_key: str = field(
         default_factory=lambda: _config_value(
@@ -98,7 +93,7 @@ class TripStarSettings:
 
     @property
     def has_llm_config(self) -> bool:
-        return bool(self.llm_model_id and self.llm_api_key and self.llm_base_url)
+        return bool(self.llm_api_key and self.llm_base_url)
 
     @property
     def effective_mock_mode(self) -> bool:

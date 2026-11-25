@@ -1,4 +1,4 @@
-"""TripStar OpenAI 兼容大模型服务。"""
+"""TripStar OpenAI-compatible LLM service."""
 from __future__ import annotations
 
 import json
@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from ...services.llm_urls import build_llm_api_url, normalize_api_mode
 from ..config import TripStarSettings
 
 logger = logging.getLogger(__name__)
@@ -48,8 +49,8 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     return parsed
 
 
-def _extract_event_stream_content(text: str) -> str:
-    """兼容部分 OpenAI 代理始终返回 text/event-stream 的情况。"""
+def _extract_chat_event_stream_content(text: str) -> str:
+    """兼容 Chat Completions 始终返回 text/event-stream 的情况。"""
     chunks: list[str] = []
     for raw_line in (text or "").splitlines():
         line = raw_line.strip()
@@ -75,49 +76,147 @@ def _extract_event_stream_content(text: str) -> str:
     return "".join(chunks).strip()
 
 
+def _extract_responses_output_text(data: Any) -> str:
+    """Extract assistant text from a Responses API JSON object."""
+    if not isinstance(data, dict):
+        return ""
+
+    direct = data.get("output_text")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+
+    chunks: list[str] = []
+    for item in data.get("output") or []:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content")
+        if isinstance(content, str):
+            chunks.append(content)
+            continue
+        for part in content or []:
+            if isinstance(part, str):
+                chunks.append(part)
+                continue
+            if not isinstance(part, dict):
+                continue
+            text = part.get("text")
+            if isinstance(text, str) and text:
+                chunks.append(text)
+    return "".join(chunks).strip()
+
+
+def _extract_responses_event_stream_content(text: str) -> str:
+    """Extract text from Responses API streaming events."""
+    deltas: list[str] = []
+    fallback = ""
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line.split(":", 1)[1].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            event = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+
+        event_type = event.get("type", "")
+        delta = event.get("delta")
+        if event_type == "response.output_text.delta" and isinstance(delta, str):
+            deltas.append(delta)
+        elif event_type == "response.output_text.done":
+            candidate = event.get("text")
+            if isinstance(candidate, str) and candidate.strip():
+                fallback = candidate.strip()
+        elif event_type == "response.output_item.done":
+            candidate = _extract_responses_output_text({"output": [event.get("item")]})
+            if candidate:
+                fallback = candidate
+        elif event_type == "response.completed":
+            candidate = _extract_responses_output_text(event.get("response"))
+            if candidate:
+                fallback = candidate
+
+    return "".join(deltas).strip() or fallback
+
+
 def _extract_chat_content(content_type: str, text: str, data: dict[str, Any]) -> str:
-    """从普通 JSON 或 SSE 响应中提取 assistant content。"""
+    """从 Chat Completions 的普通 JSON 或 SSE 响应中提取内容。"""
     if "text/event-stream" in (content_type or "").lower():
-        content = _extract_event_stream_content(text)
+        content = _extract_chat_event_stream_content(text)
         if not content:
             raise TripStarLLMError("大模型流式响应未包含有效内容")
         return content
 
     try:
-        return str(data["choices"][0]["message"]["content"])
+        content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise TripStarLLMError("大模型接口响应缺少 choices[0].message.content") from exc
+    if not isinstance(content, str) or not content.strip():
+        raise TripStarLLMError("大模型接口响应内容为空")
+    return content
+
+
+def _extract_responses_content(content_type: str, text: str, data: dict[str, Any]) -> str:
+    """从 Responses API 的普通 JSON 或 SSE 响应中提取内容。"""
+    if "text/event-stream" in (content_type or "").lower():
+        content = _extract_responses_event_stream_content(text)
+    else:
+        content = _extract_responses_output_text(data)
+        if not content:
+            # Some compatibility proxies still return Chat Completions JSON.
+            try:
+                content = _extract_chat_content("", text, data)
+            except TripStarLLMError:
+                content = ""
+
+    if not content:
+        raise TripStarLLMError("Responses 接口响应未包含有效内容")
+    return content
 
 
 class TripStarLLMClient:
-    """OpenAI Chat Completions 兼容客户端。
-
-    `base_url` 按 `/v1` 根地址保存；调用时自动追加 `/chat/completions`。
-    """
+    """Single OpenAI-compatible client for Responses and Chat Completions."""
 
     def __init__(self, settings: TripStarSettings):
         if not settings.has_llm_config:
             raise TripStarLLMError("TripStar 大模型配置不完整")
+        self.api_mode = normalize_api_mode(settings.llm_api_mode)
         self.model = settings.llm_model_id
         self.api_key = settings.llm_api_key
         self.base_url = settings.llm_base_url.rstrip("/")
         self.timeout = settings.llm_timeout
 
     @property
-    def chat_completions_url(self) -> str:
-        if self.base_url.endswith("/chat/completions"):
-            return self.base_url
-        return f"{self.base_url}/chat/completions"
+    def api_url(self) -> str:
+        return build_llm_api_url(self.base_url, self.api_mode)
+
+    def _payload(self, *, system_prompt: str, user_prompt: str) -> dict[str, Any]:
+        if self.api_mode == "responses":
+            payload: dict[str, Any] = {
+                "input": [{"role": "user", "content": user_prompt}],
+            }
+            if system_prompt:
+                payload["instructions"] = system_prompt
+        else:
+            payload = {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            }
+        if self.model:
+            payload["model"] = self.model
+        return payload
 
     def chat_json(self, *, system_prompt: str, user_prompt: str) -> dict[str, Any]:
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0.2,
-        }
+        payload = self._payload(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -125,17 +224,21 @@ class TripStarLLMClient:
 
         try:
             with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(self.chat_completions_url, headers=headers, json=payload)
+                response = client.post(self.api_url, headers=headers, json=payload)
                 response.raise_for_status()
                 content_type = response.headers.get("content-type", "")
                 if "text/event-stream" in content_type.lower():
                     data: dict[str, Any] = {}
                 else:
-                    data = response.json()
+                    raw_data = response.json()
+                    data = raw_data if isinstance(raw_data, dict) else {}
         except httpx.HTTPError as exc:
             raise TripStarLLMError(f"大模型接口请求失败：{exc}") from exc
         except ValueError as exc:
             raise TripStarLLMError("大模型接口返回了无法解析的 JSON") from exc
 
-        content = _extract_chat_content(content_type, response.text, data)
+        if self.api_mode == "responses":
+            content = _extract_responses_content(content_type, response.text, data)
+        else:
+            content = _extract_chat_content(content_type, response.text, data)
         return _extract_json_object(content)

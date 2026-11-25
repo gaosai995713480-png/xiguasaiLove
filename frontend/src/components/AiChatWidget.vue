@@ -50,133 +50,77 @@ function syncVisualViewport() {
   if (height > 0) aiViewportHeight.value = Math.round(height)
 }
 
-// 当前选中的供应商
-const activeProvider = ref('codex') // 'codex' | 'claude'
-const PROVIDER_LABELS = { claude: 'Claude', codex: 'Codex', glm: 'GLM', grok: 'Grok' }
-
-// 各供应商状态
-const providerStatus = reactive({
-  claude: { available: false, model: '' },
-  codex: { available: false, model: '', base_url: '' },
-  glm: { available: false, model: '', base_url: '' },
-  grok: { available: false, model: '', base_url: '' },
+const ASSISTANT_NAME = 'AI 助手'
+const ASSISTANT_GREETING = `你好！我是 ${ASSISTANT_NAME}，有什么可以帮你的吗？ 😊`
+const aiStatus = reactive({
+  available: false,
+  api_mode: 'responses',
 })
-
-// 各供应商独立对话历史
-const claudeMessages = ref([])
-const codexMessages = ref([])
-const glmMessages = ref([])
-const grokMessages = ref([])
-const activeConversationIds = reactive({
-  claude: null,
-  codex: null,
-  glm: null,
-  grok: null,
-})
-const activeConversationId = computed({
-  get: () => activeConversationIds[activeProvider.value] ?? null,
-  set: (value) => {
-    activeConversationIds[activeProvider.value] = value || null
-  },
-})
-
-const currentMessages = computed(() => {
-  if (activeProvider.value === 'claude') return claudeMessages.value
-  if (activeProvider.value === 'glm') return glmMessages.value
-  if (activeProvider.value === 'grok') return grokMessages.value
-  return codexMessages.value
-})
+const currentMessages = ref([])
+const activeConversationId = ref(null)
 
 // ===== localStorage 持久化 =====
 const MAX_MESSAGES = 50
 
-function chatStorageKey(provider) {
+function chatStorageKey() {
   const user = authStore.username || 'anonymous'
-  return `ai_chat_${provider}_${user}`
+  return `ai_chat_history_${user}`
 }
 
-function loadMessages(provider) {
+function loadMessages() {
   try {
-    const raw = localStorage.getItem(chatStorageKey(provider))
+    const raw = localStorage.getItem(chatStorageKey())
     if (raw) return JSON.parse(raw)
   } catch { /* 脏数据容错 */ }
   return []
 }
 
-function saveMessages(provider) {
-  const msgsMap = { claude: claudeMessages.value, codex: codexMessages.value, glm: glmMessages.value, grok: grokMessages.value }
-  const msgs = msgsMap[provider]
-  const toSave = msgs.slice(-MAX_MESSAGES)
+function saveMessages() {
+  const toSave = currentMessages.value.slice(-MAX_MESSAGES)
   try {
-    localStorage.setItem(chatStorageKey(provider), JSON.stringify(toSave))
+    localStorage.setItem(chatStorageKey(), JSON.stringify(toSave))
   } catch { /* 存储满容错 */ }
 }
 
 // 配置面板
 const showConfig = ref(false)
 const configSaving = ref(false)
-const claudeConfig = ref({ base_url: 'https://api.anthropic.com', api_key: '', model: 'claude-sonnet-4-20250514' })
-const codexConfig = ref({ base_url: '', api_key: '', model: 'gpt-5.4-codex' })
-const glmConfig = ref({ base_url: 'https://open.bigmodel.cn/api/paas/v4', api_key: '', model: 'glm-4-flash' })
-const grokConfig = ref({ base_url: 'https://api.x.ai', api_key: '', model: 'grok-3' })
-const agentConfig = ref({ show_tool_process: true, max_tool_rounds: 5 })
-const configuredApiKeys = reactive({
-  claude: false,
-  codex: false,
-  glm: false,
-  grok: false,
+const aiConfig = ref({
+  base_url: '',
+  api_key: '',
+  model: '',
+  api_mode: 'responses',
 })
+const configError = ref('')
+const agentConfig = ref({ show_tool_process: true, max_tool_rounds: 5 })
+const aiApiKeyConfigured = ref(false)
 
-// 检查供应商状态
+// 检查统一 AI 接口状态
 async function checkStatus() {
   try {
     const res = await fetchWithAuth('/api/ai/status')
     if (res.ok) {
       const data = await res.json()
-      Object.assign(providerStatus.claude, data.claude)
-      Object.assign(providerStatus.codex, data.codex)
-      Object.assign(providerStatus.glm, data.glm)
-      if (data.grok) Object.assign(providerStatus.grok, data.grok)
+      Object.assign(aiStatus, {
+        available: Boolean(data.available),
+        api_mode: data.api_mode === 'chat_completions' ? 'chat_completions' : 'responses',
+      })
     }
   } catch { /* ignore */ }
 }
 
 // 加载配置
 async function loadConfig() {
+  configError.value = ''
   try {
-    const [cRes, xRes, gRes, kRes] = await Promise.all([
-      fetchWithAuth('/api/ai/config/claude'),
-      fetchWithAuth('/api/ai/config/codex'),
-      fetchWithAuth('/api/ai/config/glm'),
-      fetchWithAuth('/api/ai/config/grok'),
-    ])
-    if (cRes.ok) {
-      const d = await cRes.json()
-      claudeConfig.value.base_url = d.base_url || ''
-      claudeConfig.value.model = d.model || ''
-      claudeConfig.value.api_key = ''
-      configuredApiKeys.claude = Boolean(d.api_key_configured)
-    }
-    if (xRes.ok) {
-      const d = await xRes.json()
-      codexConfig.value.base_url = d.base_url || ''
-      codexConfig.value.model = d.model || ''
-      codexConfig.value.api_key = ''
-      configuredApiKeys.codex = Boolean(d.api_key_configured)
-    }
-    if (gRes.ok) {
-      const d = await gRes.json()
-      glmConfig.value.base_url = d.base_url || ''
-      glmConfig.value.model = d.model || ''
-      glmConfig.value.api_key = ''
-      configuredApiKeys.glm = Boolean(d.api_key_configured)
-    }
-    if (kRes.ok) {
-      const d = await kRes.json()
-      grokConfig.value.base_url = d.base_url || ''
-      grokConfig.value.model = d.model || ''
-      grokConfig.value.api_key = ''
-      configuredApiKeys.grok = Boolean(d.api_key_configured)
+    const res = await fetchWithAuth('/api/ai/config/model')
+    if (res.ok) {
+      const data = await res.json()
+      aiConfig.value.base_url = data.base_url || ''
+      aiConfig.value.api_key = ''
+      aiConfig.value.model = data.model || ''
+      aiConfig.value.api_mode = data.api_mode === 'chat_completions' ? 'chat_completions' : 'responses'
+      aiApiKeyConfigured.value = Boolean(data.api_key_configured)
     }
     // Agent 配置
     try {
@@ -190,59 +134,29 @@ async function loadConfig() {
   } catch { /* ignore */ }
 }
 
-// 保存 Claude 配置
-async function saveClaudeConfig() {
+// 保存统一 AI 接口配置
+async function saveAIConfig() {
   configSaving.value = true
+  configError.value = ''
   try {
-    await fetchWithAuth('/api/ai/config/claude', {
+    const res = await fetchWithAuth('/api/ai/config/model', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(claudeConfig.value),
+      body: JSON.stringify(aiConfig.value),
     })
+    if (!res.ok) {
+      let detail = `保存失败 (${res.status})`
+      try {
+        const data = await res.json()
+        if (data?.detail) detail = String(data.detail)
+      } catch { /* 非 JSON 错误响应 */ }
+      throw new Error(detail)
+    }
+    await loadConfig()
     await checkStatus()
-  } catch { /* ignore */ }
-  configSaving.value = false
-}
-
-// 保存 Codex 配置
-async function saveCodexConfig() {
-  configSaving.value = true
-  try {
-    await fetchWithAuth('/api/ai/config/codex', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(codexConfig.value),
-    })
-    await checkStatus()
-  } catch { /* ignore */ }
-  configSaving.value = false
-}
-
-// 保存 GLM 配置
-async function saveGlmConfig() {
-  configSaving.value = true
-  try {
-    await fetchWithAuth('/api/ai/config/glm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(glmConfig.value),
-    })
-    await checkStatus()
-  } catch { /* ignore */ }
-  configSaving.value = false
-}
-
-// 保存 Grok 配置
-async function saveGrokConfig() {
-  configSaving.value = true
-  try {
-    await fetchWithAuth('/api/ai/config/grok', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(grokConfig.value),
-    })
-    await checkStatus()
-  } catch { /* ignore */ }
+  } catch (error) {
+    configError.value = error?.message || '保存失败，请检查配置'
+  }
   configSaving.value = false
 }
 
@@ -294,36 +208,36 @@ const showSkillForm = ref(false)
 const editingSkill = ref(null)
 const skillForm = ref({ name: '', icon: '🤖', system_prompt: '' })
 
-// 每个供应商独立的激活技能
-const activeSkills = reactive({}) // { codex: {id,name,icon,...}, glm: null, ... }
+const activeSkill = ref(null)
 
 function skillStorageKey() {
   const user = authStore.username || 'anonymous'
-  return `ai_active_skills_${user}`
+  return `ai_active_skill_${user}`
 }
 
-function loadActiveSkills() {
+function loadActiveSkill() {
   try {
     const raw = localStorage.getItem(skillStorageKey())
-    if (raw) Object.assign(activeSkills, JSON.parse(raw))
+    const saved = raw ? JSON.parse(raw) : null
+    activeSkill.value = saved && typeof saved === 'object' ? saved : null
   } catch { /* ignore */ }
 }
 
-function saveActiveSkills() {
+function saveActiveSkill() {
   try {
-    localStorage.setItem(skillStorageKey(), JSON.stringify(activeSkills))
+    localStorage.setItem(skillStorageKey(), JSON.stringify(activeSkill.value))
   } catch { /* ignore */ }
 }
 
-function setActiveSkill(provider, skill) {
-  activeSkills[provider] = skill
-  saveActiveSkills()
+function setActiveSkill(skill) {
+  activeSkill.value = skill
+  saveActiveSkill()
   showSkillDropdown.value = false
 }
 
-function clearActiveSkill(provider) {
-  activeSkills[provider] = null
-  saveActiveSkills()
+function clearActiveSkill() {
+  activeSkill.value = null
+  saveActiveSkill()
 }
 
 async function loadSkills() {
@@ -379,11 +293,10 @@ async function deleteSkill(skill) {
   try {
     await fetchWithAuth(`/api/ai/skills/${skill.id}`, { method: 'DELETE' })
     await loadSkills()
-    // 如果删除的是当前激活的，清除激活
-    for (const p of ['codex', 'glm', 'grok', 'claude']) {
-      if (activeSkills[p]?.id === skill.id) activeSkills[p] = null
+    if (activeSkill.value?.id === skill.id) {
+      activeSkill.value = null
+      saveActiveSkill()
     }
-    saveActiveSkills()
   } catch { /* ignore */ }
 }
 
@@ -395,24 +308,18 @@ const historyLoading = ref(false)
 const creatingConversation = ref(false)
 let historyRequestSeq = 0
 
-function messagesFor(provider) {
-  const msgsMap = { claude: claudeMessages, codex: codexMessages, glm: glmMessages, grok: grokMessages }
-  return msgsMap[provider]
-}
-
-async function loadConversations(provider = activeProvider.value) {
+async function loadConversations() {
   const requestId = ++historyRequestSeq
   try {
-    const res = await fetchWithAuth(`/api/ai/conversations?provider=${provider}`)
+    const res = await fetchWithAuth('/api/ai/conversations')
     if (!res.ok) return
     const data = await res.json()
-    if (requestId !== historyRequestSeq || provider !== activeProvider.value) return
+    if (requestId !== historyRequestSeq) return
     conversations.value = data
   } catch { /* ignore */ }
 }
 
 async function createConversation({
-  provider = activeProvider.value,
   resetMessages = true,
   activate = true,
 } = {}) {
@@ -420,16 +327,13 @@ async function createConversation({
     const res = await fetchWithAuth('/api/ai/conversations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider, title: '新对话' }),
+      body: JSON.stringify({ title: '新对话' }),
     })
     if (res.ok) {
       const data = await res.json()
-      if (activate) activeConversationIds[provider] = data.id
+      if (activate) activeConversationId.value = data.id
       if (resetMessages) {
-        messagesFor(provider).value = [{
-          role: 'assistant',
-          content: `你好！我是 ${PROVIDER_LABELS[provider]}，有什么可以帮你的吗？ 😊`,
-        }]
+        currentMessages.value = [{ role: 'assistant', content: ASSISTANT_GREETING }]
       }
       return data.id
     }
@@ -439,24 +343,20 @@ async function createConversation({
 
 async function openConversation(conv) {
   if (isLoading.value) return
-  const provider = activeProvider.value
   const requestId = ++historyRequestSeq
   historyLoading.value = true
   try {
     const res = await fetchWithAuth(`/api/ai/conversations/${conv.id}/messages`)
     if (res.ok) {
       const data = await res.json()
-      if (requestId !== historyRequestSeq || provider !== activeProvider.value) return
+      if (requestId !== historyRequestSeq) return
       const savedMessages = Array.isArray(data.messages) ? data.messages : []
       if (savedMessages.length > 0) {
-        messagesFor(provider).value = savedMessages.map(m => ({ role: m.role, content: m.content }))
+        currentMessages.value = savedMessages.map(m => ({ role: m.role, content: m.content }))
       } else {
-        messagesFor(provider).value = [{
-          role: 'assistant',
-          content: `你好！我是 ${PROVIDER_LABELS[provider]}，有什么可以帮你的吗？ 😊`,
-        }]
+        currentMessages.value = [{ role: 'assistant', content: ASSISTANT_GREETING }]
       }
-      activeConversationIds[provider] = conv.id
+      activeConversationId.value = conv.id
       showHistory.value = false
       scrollToBottom()
     }
@@ -469,30 +369,28 @@ async function openConversation(conv) {
 async function deleteConversation(conv) {
   if (isLoading.value) return
   if (!window.confirm(`确定删除对话「${conv.title || '未命名'}」吗？`)) return
-  const provider = activeProvider.value
   try {
     const res = await fetchWithAuth(`/api/ai/conversations/${conv.id}`, { method: 'DELETE' })
     if (!res.ok) return
     conversations.value = conversations.value.filter(c => c.id !== conv.id)
-    if (activeConversationIds[provider] === conv.id) {
-      activeConversationIds[provider] = null
+    if (activeConversationId.value === conv.id) {
+      activeConversationId.value = null
     }
   } catch { /* ignore */ }
 }
 
 async function searchConversations() {
-  const provider = activeProvider.value
   if (!historySearchQuery.value.trim()) {
-    await loadConversations(provider)
+    await loadConversations()
     return
   }
   const query = historySearchQuery.value
   const requestId = ++historyRequestSeq
   try {
-    const res = await fetchWithAuth(`/api/ai/conversations/search?q=${encodeURIComponent(query)}&provider=${provider}`)
+    const res = await fetchWithAuth(`/api/ai/conversations/search?q=${encodeURIComponent(query)}`)
     if (!res.ok) return
     const data = await res.json()
-    if (requestId !== historyRequestSeq || provider !== activeProvider.value) return
+    if (requestId !== historyRequestSeq) return
     conversations.value = data
   } catch { /* ignore */ }
 }
@@ -526,16 +424,15 @@ async function saveConversationMessages(convId, userText, aiText) {
 function openHistoryPanel() {
   showHistory.value = true
   historySearchQuery.value = ''
-  loadConversations(activeProvider.value)
+  loadConversations()
 }
 
 async function startNewConversation() {
   if (isLoading.value || creatingConversation.value) return
   creatingConversation.value = true
-  const provider = activeProvider.value
   try {
-    const id = await createConversation({ provider })
-    if (id && provider === activeProvider.value) {
+    const id = await createConversation()
+    if (id) {
       showHistory.value = false
       scrollToBottom()
     }
@@ -564,12 +461,9 @@ onMounted(() => {
   visualViewport?.addEventListener('scroll', syncVisualViewport, { passive: true })
   window.addEventListener('resize', syncVisualViewport)
   checkStatus()
-  initMessages('claude')
-  initMessages('codex')
-  initMessages('glm')
-  initMessages('grok')
+  initMessages()
   loadSkills()
-  loadActiveSkills()
+  loadActiveSkill()
   if (props.embedded) nextTick(() => scrollToBottom())
 })
 
@@ -641,34 +535,19 @@ function toggleChat() {
   }
 }
 
-function initMessages(provider) {
-  const msgs = messagesFor(provider)
-  if (msgs.value.length > 0) return
+function initMessages() {
+  if (currentMessages.value.length > 0) return
 
-  const saved = loadMessages(provider)
+  const saved = loadMessages()
   if (saved.length > 0) {
-    msgs.value = saved
+    currentMessages.value = saved
   } else {
-    msgs.value.push({
-      role: 'assistant',
-      content: `你好！我是 ${PROVIDER_LABELS[provider]}，有什么可以帮你的吗？ 😊`,
-    })
+    currentMessages.value.push({ role: 'assistant', content: ASSISTANT_GREETING })
   }
 }
 
-function hasConfiguredApiKey(provider, config) {
-  return configuredApiKeys[provider] || Boolean(config.api_key?.trim())
-}
-
-function switchProvider(p) {
-  if (isLoading.value) return
-  historyRequestSeq += 1
-  historyLoading.value = false
-  activeProvider.value = p
-  showConfig.value = false
-  showHistory.value = false
-  showSkillDropdown.value = false
-  scrollToBottom()
+function hasConfiguredApiKey(config) {
+  return aiApiKeyConfigured.value || Boolean(config.api_key?.trim())
 }
 
 function scrollToBottom() {
@@ -696,11 +575,10 @@ async function sendMessage() {
   const text = inputText.value.trim()
   if (!text || isLoading.value || creatingConversation.value) return
 
-  const provider = activeProvider.value
   const sendRequestId = ++sendRequestSeq
-  const conversationIdAtStart = activeConversationIds[provider] || null
-  const skillId = activeSkills[provider]?.id || null
-  const msgs = messagesFor(provider)
+  const conversationIdAtStart = activeConversationId.value || null
+  const skillId = activeSkill.value?.id || null
+  const msgs = currentMessages
 
   msgs.value.push({ role: 'user', content: text })
   inputText.value = ''
@@ -751,7 +629,6 @@ async function sendMessage() {
       body: JSON.stringify({
         message: text,
         history,
-        provider,
         skill_id: skillId,
         client_context: contextStore.getFormattedContext(),
       }),
@@ -880,18 +757,18 @@ async function sendMessage() {
     const shouldFinalizeRequest = abortController === controller
 
     if (!componentUnmounted && sendRequestId === sendRequestSeq) {
-      saveMessages(provider)
+      saveMessages()
       scrollToBottom()
 
-      // 持久化到请求开始时绑定的 provider/conversation，避免中途切页串会话。
+      // 持久化到请求开始时的会话，避免生成过程中切换历史记录串会话。
       const aiText = aiMsg.content
       if (shouldPersistResponse && aiText && aiText !== '抱歉，没有收到回复。' && aiText !== '（已停止生成）' && aiText !== '登录已过期，请重新登录') {
         let convId = conversationIdAtStart
         if (!convId) {
-          convId = await createConversation({ provider, resetMessages: false, activate: false })
+          convId = await createConversation({ resetMessages: false, activate: false })
         }
         if (convId && sendRequestId === sendRequestSeq) {
-          if (!activeConversationIds[provider]) activeConversationIds[provider] = convId
+          if (!activeConversationId.value) activeConversationId.value = convId
           await saveConversationMessages(convId, text, aiText)
         }
       }
@@ -914,14 +791,9 @@ function clearChat() {
   sendRequestSeq += 1
   abortController?.abort()
   cancelTypewriter()
-  const provider = activeProvider.value
-  activeConversationIds[provider] = null
-  const msgs = messagesFor(provider)
-  msgs.value = [{
-    role: 'assistant',
-    content: `你好！我是 ${PROVIDER_LABELS[provider]}，有什么可以帮你的吗？ 😊`,
-  }]
-  saveMessages(provider)
+  activeConversationId.value = null
+  currentMessages.value = [{ role: 'assistant', content: ASSISTANT_GREETING }]
+  saveMessages()
 }
 
 async function handleBubbleClick(e) {
@@ -1002,40 +874,9 @@ async function handleBubbleClick(e) {
         <div class="chat-header">
           <span class="chat-header-icon">🤖</span>
 
-          <!-- 供应商切换器 -->
-          <div class="provider-switcher">
-            <button
-              class="provider-tab"
-              :class="{ active: activeProvider === 'codex' }"
-              @click="switchProvider('codex')"
-            >
-              <span class="provider-dot" :class="{ online: providerStatus.codex.available }"></span>
-              Codex
-            </button>
-            <button
-              class="provider-tab"
-              :class="{ active: activeProvider === 'glm' }"
-              @click="switchProvider('glm')"
-            >
-              <span class="provider-dot" :class="{ online: providerStatus.glm.available }"></span>
-              GLM
-            </button>
-            <button
-              class="provider-tab"
-              :class="{ active: activeProvider === 'grok' }"
-              @click="switchProvider('grok')"
-            >
-              <span class="provider-dot" :class="{ online: providerStatus.grok.available }"></span>
-              Grok
-            </button>
-            <button
-              class="provider-tab"
-              :class="{ active: activeProvider === 'claude' }"
-              @click="switchProvider('claude')"
-            >
-              <span class="provider-dot" :class="{ online: providerStatus.claude.available }"></span>
-              Claude
-            </button>
+          <div class="assistant-brand">
+            <span class="status-dot" :class="{ online: aiStatus.available }"></span>
+            <span class="assistant-name">{{ ASSISTANT_NAME }}</span>
           </div>
 
           <div class="chat-header-actions">
@@ -1082,9 +923,9 @@ async function handleBubbleClick(e) {
 
         <!-- 技能选择器 -->
         <div v-if="!showConfig" class="skill-selector-bar">
-          <div class="skill-active-tag" v-if="activeSkills[activeProvider]" @click="showSkillDropdown = !showSkillDropdown">
-            <span>{{ activeSkills[activeProvider].icon }} {{ activeSkills[activeProvider].name }}</span>
-            <button class="skill-clear-btn" @click.stop="clearActiveSkill(activeProvider)">×</button>
+          <div class="skill-active-tag" v-if="activeSkill" @click="showSkillDropdown = !showSkillDropdown">
+            <span>{{ activeSkill.icon }} {{ activeSkill.name }}</span>
+            <button class="skill-clear-btn" @click.stop="clearActiveSkill">×</button>
           </div>
           <button v-else class="skill-select-btn" @click="showSkillDropdown = !showSkillDropdown">
             🎭 选择技能
@@ -1097,8 +938,8 @@ async function handleBubbleClick(e) {
               v-for="s in skillsList"
               :key="s.id"
               class="skill-dropdown-item"
-              :class="{ active: activeSkills[activeProvider]?.id === s.id }"
-              @click="setActiveSkill(activeProvider, s)"
+              :class="{ active: activeSkill?.id === s.id }"
+              @click="setActiveSkill(s)"
             >
               <span class="skill-dropdown-icon">{{ s.icon }}</span>
               <span class="skill-dropdown-name">{{ s.name }}</span>
@@ -1213,41 +1054,26 @@ async function handleBubbleClick(e) {
             </div>
           </div>
 
-          <!-- 管理员供应商配置 -->
+          <!-- 管理员 AI 接口配置 -->
           <template v-if="authStore.isAdmin">
             <div class="config-divider"></div>
             <div style="padding: 0 14px; color: rgba(255,255,255,0.5); font-size: 11px; text-align: center;">—— 以下为管理员配置 ——</div>
 
             <div class="config-section">
-              <div class="config-section-title">🟢 Codex</div>
-              <div class="config-field"><label>API 地址</label><input v-model="codexConfig.base_url" type="text" placeholder="https://ai.qaq.al" /></div>
-              <div class="config-field"><label>API Key</label><input v-model="codexConfig.api_key" type="password" placeholder="sk-..." /></div>
-              <div class="config-field"><label>模型</label><input v-model="codexConfig.model" type="text" placeholder="gpt-5.4-codex" /></div>
-              <button class="config-save" :disabled="!codexConfig.base_url || !hasConfiguredApiKey('codex', codexConfig) || configSaving" @click="saveCodexConfig">{{ configSaving ? '保存中...' : '💾 保存 Codex' }}</button>
-            </div>
-            <div class="config-divider"></div>
-            <div class="config-section">
-              <div class="config-section-title">🔵 GLM</div>
-              <div class="config-field"><label>API 地址</label><input v-model="glmConfig.base_url" type="text" placeholder="https://open.bigmodel.cn/api/paas/v4" /></div>
-              <div class="config-field"><label>API Key</label><input v-model="glmConfig.api_key" type="password" placeholder="智谱 API Key" /></div>
-              <div class="config-field"><label>模型</label><input v-model="glmConfig.model" type="text" placeholder="glm-4-flash" /></div>
-              <button class="config-save" :disabled="!glmConfig.base_url || !hasConfiguredApiKey('glm', glmConfig) || configSaving" @click="saveGlmConfig">{{ configSaving ? '保存中...' : '💾 保存 GLM' }}</button>
-            </div>
-            <div class="config-divider"></div>
-            <div class="config-section">
-              <div class="config-section-title">🟠 Grok</div>
-              <div class="config-field"><label>API 地址</label><input v-model="grokConfig.base_url" type="text" placeholder="https://api.x.ai" /></div>
-              <div class="config-field"><label>API Key</label><input v-model="grokConfig.api_key" type="password" placeholder="xai-..." /></div>
-              <div class="config-field"><label>模型</label><input v-model="grokConfig.model" type="text" placeholder="grok-3" /></div>
-              <button class="config-save" :disabled="!grokConfig.base_url || !hasConfiguredApiKey('grok', grokConfig) || configSaving" @click="saveGrokConfig">{{ configSaving ? '保存中...' : '💾 保存 Grok' }}</button>
-            </div>
-            <div class="config-divider"></div>
-            <div class="config-section">
-              <div class="config-section-title">🟣 Claude</div>
-              <div class="config-field"><label>API 地址</label><input v-model="claudeConfig.base_url" type="text" placeholder="https://api.anthropic.com" /></div>
-              <div class="config-field"><label>API Key</label><input v-model="claudeConfig.api_key" type="password" placeholder="sk-ant-..." /></div>
-              <div class="config-field"><label>模型</label><input v-model="claudeConfig.model" type="text" placeholder="claude-sonnet-4-20250514" /></div>
-              <button class="config-save" :disabled="!claudeConfig.base_url || !hasConfiguredApiKey('claude', claudeConfig) || configSaving" @click="saveClaudeConfig">{{ configSaving ? '保存中...' : '💾 保存 Claude' }}</button>
+              <div class="config-section-title">🧠 AI 接口</div>
+              <div class="config-hint">💡 支持根地址、/v1 或对应的完整接口地址</div>
+              <div class="config-field">
+                <label>接口类型</label>
+                <select v-model="aiConfig.api_mode">
+                  <option value="responses">Responses API（默认）</option>
+                  <option value="chat_completions">Chat Completions</option>
+                </select>
+              </div>
+              <div class="config-field"><label>请求地址</label><input v-model="aiConfig.base_url" type="text" placeholder="https://example.com/v1" /></div>
+              <div class="config-field"><label>API Key</label><input v-model="aiConfig.api_key" type="password" placeholder="sk-..." /></div>
+              <div class="config-field"><label>模型（可选）</label><input v-model="aiConfig.model" type="text" placeholder="留空则由上游决定" /></div>
+              <button class="config-save" :disabled="!aiConfig.base_url || !hasConfiguredApiKey(aiConfig) || configSaving" @click="saveAIConfig">{{ configSaving ? '保存中...' : '💾 保存 AI 接口' }}</button>
+              <div v-if="configError" class="config-error">{{ configError }}</div>
             </div>
 
             <div class="config-divider"></div>
@@ -1270,8 +1096,8 @@ async function handleBubbleClick(e) {
         </div>
 
         <!-- 不可用提示 -->
-        <div v-else-if="!providerStatus[activeProvider]?.available" class="chat-unavailable">
-          <p>⚠️ {{ { claude: 'Claude API', codex: 'Codex API', glm: 'GLM API', grok: 'Grok API' }[activeProvider] }} 未配置</p>
+        <div v-else-if="!aiStatus.available" class="chat-unavailable">
+          <p>⚠️ AI 接口未配置</p>
           <p v-if="authStore.isAdmin" class="chat-unavailable-hint">点击 ⚙️ 进行配置</p>
           <p v-else class="chat-unavailable-hint">请联系管理员配置</p>
         </div>
@@ -1280,17 +1106,17 @@ async function handleBubbleClick(e) {
         <div v-else ref="listRef" class="chat-messages" @click="handleBubbleClick">
           <div
             v-for="(msg, i) in currentMessages"
-            :key="`${activeProvider}-${i}`"
+            :key="i"
             class="chat-msg"
             :class="msg.role"
           >
             <!-- 助手头像 -->
             <div class="msg-avatar assistant-avatar" v-if="msg.role === 'assistant'">
-              <span class="avatar-icon">{{ { claude: '🟣', codex: '🟢', glm: '🔵', grok: '🟠' }[activeProvider] }}</span>
+              <span class="avatar-icon">🤖</span>
             </div>
             
             <div class="msg-content-wrapper">
-              <div class="msg-name" v-if="msg.role === 'assistant'">{{ { claude: 'Claude', codex: 'Codex', glm: 'GLM', grok: 'Grok' }[activeProvider] }}</div>
+              <div class="msg-name" v-if="msg.role === 'assistant'">{{ ASSISTANT_NAME }}</div>
               <div class="msg-bubble">
                 <span class="msg-text" v-html="renderSafeMarkdown(msg.content)"></span>
                 <span v-if="isLoading && i === currentMessages.length - 1 && msg.role === 'assistant'" class="msg-cursor">▊</span>
@@ -1306,7 +1132,7 @@ async function handleBubbleClick(e) {
         </div>
 
         <!-- 输入区 -->
-        <div class="chat-input-bar" v-if="providerStatus[activeProvider]?.available && !showConfig">
+        <div class="chat-input-bar" v-if="aiStatus.available && !showConfig">
           <textarea
             v-model="inputText"
             class="chat-input"
@@ -1429,41 +1255,28 @@ async function handleBubbleClick(e) {
   background: rgba(255, 255, 255, 0.12);
 }
 
-/* ===== 供应商切换器 ===== */
-.provider-switcher {
+/* ===== AI 品牌状态 ===== */
+.assistant-brand {
   flex: 1;
-  display: flex;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  padding: 2px;
-  gap: 2px;
-}
-.provider-tab {
-  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 5px 8px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
+  gap: 8px;
+  padding: 0 4px;
 }
-.provider-tab.active {
-  background: rgba(102, 126, 234, 0.25);
-  color: #fff;
+.assistant-name {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
 }
-.provider-tab:hover:not(.active) { background: rgba(255,255,255,0.05); }
-.provider-dot {
-  width: 6px; height: 6px; border-radius: 50%;
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
   background: rgba(255,255,255,0.2);
+  flex: 0 0 auto;
 }
-.provider-dot.online { background: #4ade80; }
+.status-dot.online { background: #4ade80; }
 
 .chat-header-btn, .chat-header-close {
   width: 28px; height: 28px; border-radius: 50%; border: none;
@@ -1515,7 +1328,7 @@ async function handleBubbleClick(e) {
   color: var(--text-primary); font-size: 13px;
   outline: none; transition: border-color 0.2s;
 }
-.config-field input:focus { border-color: rgba(102, 126, 234, 0.5); }
+.config-field input:focus, .config-field select:focus { border-color: rgba(102, 126, 234, 0.5); }
 .config-field input::placeholder { color: rgba(255,255,255,0.3); }
 .config-save {
   padding: 10px; border: none; border-radius: 10px;
@@ -1528,6 +1341,11 @@ async function handleBubbleClick(e) {
   box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
 }
 .config-save:disabled { opacity: 0.4; cursor: not-allowed; }
+.config-error {
+  color: #fca5a5;
+  font-size: 12px;
+  line-height: 1.4;
+}
 
 /* ===== 技能选择器 ===== */
 .skill-selector-bar {
@@ -2010,22 +1828,9 @@ async function handleBubbleClick(e) {
     flex: 0 0 auto;
   }
 
-  .provider-switcher {
+  .assistant-brand {
     flex: 1 1 calc(100% - 44px);
     min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .provider-switcher::-webkit-scrollbar {
-    display: none;
-  }
-
-  .provider-tab {
-    flex: 0 0 auto;
-    min-width: 64px;
-    min-height: var(--touch-min);
-    padding: 0 10px;
   }
 
   .chat-header-actions {

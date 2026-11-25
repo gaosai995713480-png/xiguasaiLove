@@ -6,6 +6,7 @@ const mockFetchWithAuth = vi.fn()
 const authState = reactive({
   username: 'admin',
   isAdmin: false,
+  user: null,
 })
 
 vi.mock('../api/index.js', () => ({
@@ -99,11 +100,9 @@ async function mountWidget() {
   })
 }
 
-const providerStatus = {
-  claude: { available: true, model: 'claude' },
-  codex: { available: true, model: 'codex' },
-  glm: { available: true, model: 'glm' },
-  grok: { available: true, model: 'grok' },
+const aiStatus = {
+  available: true,
+  api_mode: 'responses',
 }
 
 describe('AiChatWidget', () => {
@@ -112,6 +111,7 @@ describe('AiChatWidget', () => {
     localStorage.clear()
     authState.username = 'admin'
     authState.isAdmin = false
+    authState.user = null
     rafQueue = []
     rafId = 0
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback) => {
@@ -129,28 +129,31 @@ describe('AiChatWidget', () => {
     vi.restoreAllMocks()
   })
 
-  it('切换 provider 后不会复用另一 provider 的 conversationId', async () => {
+  it('使用统一 AI 接口，并能复用历史会话继续对话', async () => {
     let savedMessages = null
+    let chatBody = null
     mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
-      if (url === '/api/ai/status') return jsonResponse(providerStatus)
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
       if (url === '/api/ai/skills') return jsonResponse([])
-      if (url === '/api/ai/conversations?provider=codex') {
-        return jsonResponse([{ id: 11, title: 'Codex 会话' }])
+      if (url === '/api/ai/conversations') {
+        return jsonResponse([{ id: 11, title: 'AI 会话' }])
       }
       if (url === '/api/ai/conversations/11/messages' && !options.method) {
-        return jsonResponse({ messages: [{ role: 'user', content: '历史消息' }] })
+        return jsonResponse({
+          messages: [
+            { role: 'user', content: '历史消息' },
+            { role: 'assistant', content: '历史回复' },
+          ],
+        })
       }
       if (url === '/api/ai/chat') {
-        return streamResponse('data: "Claude回复"\n\ndata: [DONE]\n\n', options.signal)
+        chatBody = JSON.parse(options.body)
+        return streamResponse('data: "AI回复"\n\ndata: [DONE]\n\n', options.signal)
       }
-      if (url === '/api/ai/conversations' && options.method === 'POST') {
-        return jsonResponse({ id: 22, title: '新对话', provider: 'claude' })
-      }
-      if (url === '/api/ai/conversations/22/messages' && options.method === 'POST') {
+      if (url === '/api/ai/conversations/11/messages' && options.method === 'POST') {
         savedMessages = JSON.parse(options.body)
         return jsonResponse({ ok: true })
       }
-      if (url === '/api/ai/conversations/22/title') return jsonResponse({ ok: true })
       return jsonResponse({})
     })
 
@@ -162,8 +165,15 @@ describe('AiChatWidget', () => {
     await wrapper.find('.history-item').trigger('click')
     await flushPromises()
 
-    const claudeTab = wrapper.findAll('.provider-tab').find((tab) => tab.text().includes('Claude'))
-    await claudeTab.trigger('click')
+    const assistantBrand = wrapper.get('.assistant-brand')
+    expect(assistantBrand.text()).toContain('AI 助手')
+    expect(assistantBrand.find('.status-dot').classes()).toContain('online')
+    expect(wrapper.find('.provider-switcher').exists()).toBe(false)
+    const historyRequest = mockFetchWithAuth.mock.calls.find(([url]) => (
+      url === '/api/ai/conversations'
+    ))
+    expect(historyRequest).toBeTruthy()
+
     await wrapper.find('.chat-input').setValue('你好')
     await wrapper.find('.chat-send').trigger('click')
     await flushPromises()
@@ -177,24 +187,50 @@ describe('AiChatWidget', () => {
       expect(savedMessages).not.toBeNull()
     }, { timeout: 1000, interval: 10 })
 
-    const postUrls = mockFetchWithAuth.mock.calls
-      .filter(([, options]) => options?.method === 'POST')
-      .map(([url]) => url)
-    expect(postUrls).not.toContain('/api/ai/conversations/11/messages')
-    expect(postUrls).toContain('/api/ai/conversations')
-    expect(postUrls).toContain('/api/ai/conversations/22/messages')
-    expect(wrapper.text()).toContain('Claude回复')
+    expect(chatBody).not.toHaveProperty('provider')
+    expect(mockFetchWithAuth.mock.calls.every(([url]) => !String(url).includes('provider='))).toBe(true)
+    expect(chatBody.skill_id).toBeNull()
+    expect(wrapper.text()).toContain('AI回复')
     expect(savedMessages).toEqual([
       { role: 'user', content: '你好' },
-      { role: 'assistant', content: 'Claude回复' },
+      { role: 'assistant', content: 'AI回复' },
     ])
+    expect(mockFetchWithAuth.mock.calls.some(([url, options]) => (
+      url === '/api/ai/conversations' && options?.method === 'POST'
+    ))).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('新建会话只提交标题', async () => {
+    let createBody = null
+    mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
+      if (url === '/api/ai/skills') return jsonResponse([])
+      if (url === '/api/ai/conversations' && options.method === 'POST') {
+        createBody = JSON.parse(options.body)
+        return jsonResponse({ id: 22, title: '新对话' })
+      }
+      if (url === '/api/ai/conversations') return jsonResponse([])
+      return jsonResponse({})
+    })
+
+    const wrapper = await mountWidget()
+    await flushPromises()
+    await wrapper.find('.ai-fab').trigger('click')
+    await wrapper.find('[title="对话历史"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('.history-new-btn').trigger('click')
+    await flushPromises()
+
+    expect(createBody).toEqual({ title: '新对话' })
 
     wrapper.unmount()
   })
 
   it('停止生成会取消 typewriter RAF 并结束 loading', async () => {
     mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
-      if (url === '/api/ai/status') return jsonResponse(providerStatus)
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
       if (url === '/api/ai/skills') return jsonResponse([])
       if (url === '/api/ai/chat') return pendingStreamResponse(options.signal)
       return jsonResponse({})
@@ -219,22 +255,28 @@ describe('AiChatWidget', () => {
     wrapper.unmount()
   })
 
-  it('已有 API Key 时无需重新输入即可保存模型配置', async () => {
+  it('AI 接口配置支持默认 Responses、可选模型和 Chat Completions', async () => {
     authState.isAdmin = true
-    mockFetchWithAuth.mockImplementation(async (url) => {
-      if (url === '/api/ai/status') return jsonResponse(providerStatus)
+    let savedBody = null
+    mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
       if (url === '/api/ai/skills') return jsonResponse([])
       if (url === '/api/ai/memory') return jsonResponse({ facts: [] })
       if (url === '/api/ai/config/agent') {
         return jsonResponse({ show_tool_process: true, max_tool_rounds: 5 })
       }
-      if (url.startsWith('/api/ai/config/')) {
+      if (url === '/api/ai/config/model' && !options.method) {
         return jsonResponse({
-          base_url: 'https://api.example.com',
-          model: 'model-a',
+          base_url: 'https://example.com/v1',
           api_key_configured: true,
           api_key_masked: 'sk-****',
+          model: 'gpt-5.4-codex',
+          api_mode: 'responses',
         })
+      }
+      if (url === '/api/ai/config/model' && options.method === 'POST') {
+        savedBody = JSON.parse(options.body)
+        return jsonResponse({ ok: true })
       }
       return jsonResponse({})
     })
@@ -245,16 +287,84 @@ describe('AiChatWidget', () => {
     await wrapper.find('[title="配置"]').trigger('click')
     await flushPromises()
 
-    const saveCodex = wrapper.findAll('button').find((button) => button.text().includes('保存 Codex'))
-    expect(saveCodex).toBeTruthy()
-    expect(saveCodex.attributes('disabled')).toBeUndefined()
+    const saveAI = wrapper.findAll('button').find((button) => button.text().includes('保存 AI 接口'))
+    expect(saveAI).toBeTruthy()
+    expect(saveAI.attributes('disabled')).toBeUndefined()
+    const aiSection = wrapper.findAll('.config-section')
+      .find((section) => section.text().includes('AI 接口'))
+    expect(aiSection.findAll('label').map((label) => label.text())).toEqual([
+      '接口类型',
+      '请求地址',
+      'API Key',
+      '模型（可选）',
+    ])
+    const modeSelect = aiSection.get('select')
+    expect(modeSelect.element.value).toBe('responses')
+    const modelInput = aiSection.findAll('input').find((input) => (
+      input.element.placeholder === '留空则由上游决定'
+    ))
+    expect(modelInput.element.value).toBe('gpt-5.4-codex')
+
+    await modelInput.setValue('')
+    await saveAI.trigger('click')
+    await flushPromises()
+
+    expect(savedBody).toEqual({
+      base_url: 'https://example.com/v1',
+      api_key: '',
+      model: '',
+      api_mode: 'responses',
+    })
+
+    await modeSelect.setValue('chat_completions')
+    await saveAI.trigger('click')
+    await flushPromises()
+    expect(savedBody.api_mode).toBe('chat_completions')
+
+    wrapper.unmount()
+  })
+
+  it('AI 接口保存失败时展示后端错误', async () => {
+    authState.isAdmin = true
+    mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
+      if (url === '/api/ai/skills') return jsonResponse([])
+      if (url === '/api/ai/memory') return jsonResponse({ facts: [] })
+      if (url === '/api/ai/config/agent') {
+        return jsonResponse({ show_tool_process: true, max_tool_rounds: 5 })
+      }
+      if (url === '/api/ai/config/model' && !options.method) {
+        return jsonResponse({
+          base_url: 'https://example.com/v1',
+          api_key_configured: true,
+          model: '',
+          api_mode: 'responses',
+        })
+      }
+      if (url === '/api/ai/config/model' && options.method === 'POST') {
+        return jsonResponse({ detail: '请求地址无效' }, 400)
+      }
+      return jsonResponse({})
+    })
+
+    const wrapper = await mountWidget()
+    await flushPromises()
+    await wrapper.find('.ai-fab').trigger('click')
+    await wrapper.find('[title="配置"]').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find((button) => button.text().includes('保存 AI 接口'))
+      .trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.config-error').text()).toContain('请求地址无效')
 
     wrapper.unmount()
   })
 
   it('悬浮模式点击按钮后声明 dialog 语义并同步 visualViewport 高度', async () => {
     mockFetchWithAuth.mockImplementation(async (url) => {
-      if (url === '/api/ai/status') return jsonResponse(providerStatus)
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
       if (url === '/api/ai/skills') return jsonResponse([])
       return jsonResponse({})
     })
@@ -286,7 +396,7 @@ describe('AiChatWidget', () => {
 
   it('embedded 模式不渲染 FAB 和关闭按钮，返回只触发事件且面板保持渲染', async () => {
     mockFetchWithAuth.mockImplementation(async (url) => {
-      if (url === '/api/ai/status') return jsonResponse(providerStatus)
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
       if (url === '/api/ai/skills') return jsonResponse([])
       return jsonResponse({})
     })
@@ -315,9 +425,9 @@ describe('AiChatWidget', () => {
 
   it('删除历史对话前要求二次确认，取消时不会发删除请求', async () => {
     mockFetchWithAuth.mockImplementation(async (url, options = {}) => {
-      if (url === '/api/ai/status') return jsonResponse(providerStatus)
+      if (url === '/api/ai/status') return jsonResponse(aiStatus)
       if (url === '/api/ai/skills') return jsonResponse([])
-      if (url === '/api/ai/conversations?provider=codex') {
+      if (url === '/api/ai/conversations') {
         return jsonResponse([{ id: 77, title: '待删除对话' }])
       }
       if (url === '/api/ai/conversations/77' && options.method === 'DELETE') {

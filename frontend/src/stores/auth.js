@@ -45,7 +45,7 @@ export const useAuthStore = defineStore('auth', () => {
     } finally {
       try {
         const localKeys = Object.keys(localStorage).filter(
-          (key) => key.startsWith('ai_chat_') || key.startsWith('ai_active_skills_'),
+          (key) => key.startsWith('ai_chat_') || key.startsWith('ai_active_skill'),
         )
         localKeys.forEach((key) => localStorage.removeItem(key))
         localStorage.removeItem('express_history')
